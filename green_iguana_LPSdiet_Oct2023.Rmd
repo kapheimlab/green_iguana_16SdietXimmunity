@@ -1,0 +1,4192 @@
+---
+title: "Green Iguana Diet x Immune Challenge"
+author: "Karen M. Kapheim"
+date: "08 Aug 2023"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+Rerunning the correlation stats to include only the differentially abundant 
+taxa and fewer physiological measures.
+
+
+# Basic setup before we begin analysis
+
+#### KNITR options
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(include=TRUE, echo=TRUE , fig.width = 6, warning = FALSE, message = FALSE)
+```
+
+
+Working directory
+
+```{r dir}
+getwd()
+```
+
+#### CRAN package
+
+```{r packages-1, eval=FALSE, echo = FALSE, include = FALSE}
+.cran_packages <- c("knitr", "phyloseqGraphTest", "phyloseq", "shiny",
+                  "miniUI", "caret", "pls", "e1071", "ggplot2", "randomForest",
+                  "vegan", "plyr", "dplyr", "ggrepel", "nlme",
+                  "reshape2","devtools", "PMA", "structSSI", "ade4",
+                  "igraph", "ggnetwork", "intergraph", "scales")
+.github_packages <- c("jfukuyama/phyloseqGraphTest")
+.bioc_packages <- c("phyloseq", "genefilter", "impute")
+
+
+# Install CRAN packages (if not already installed)
+.inst <- .cran_packages %in% installed.packages()
+if (any(!.inst)){
+  install.packages(.cran_packages[!.inst],repos = "http://cran.rstudio.com/")
+}
+
+.inst <- .github_packages %in% installed.packages()
+if (any(!.inst)){
+  devtools::install_github(.github_packages[!.inst])
+}
+
+.inst <- .bioc_packages %in% installed.packages()
+if(any(!.inst)){
+  source("http://bioconductor.org/biocLite.R")
+  BiocManager::install(.bioc_packages[!.inst])
+}
+```
+
+#### Libraries
+
+```{r packages-2, echo = FALSE}
+library(tidyverse)
+library(phyloseq)
+library(vegan)
+library(RVAideMemoire)
+library(qiime2R)
+library(ggplot2)
+library(Biostrings)
+library(plyr)
+library(dplyr)
+library(reshape2)
+library(devtools)
+library(data.table)
+library(nortest)
+library(glmm)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(car)
+library(DESeq2)
+library(microbiome)
+library(decontam)
+library(forcats)
+library(fitdistrplus)
+library(caret)
+library(dendextend)
+library(corrplot)
+library(MASS)
+library(corncob)
+library(microViz)
+library(svglite)
+```
+
+
+# Make phyloseq object
+
+#### Import files
+
+Following vignette from Qiime2R     
+[https://rdrr.io/github/jbisanz/qiime2R/f/vignettes/vignette.Rmd].
+
+```{r import-1a}
+meta.tsv <- read_tsv("GreenIguanaManifest_subset_reduced.txt")
+meta.tsv <- meta.tsv %>% mutate_all(as.factor)
+SVs <- read_qza("LPSdiet_table.qza")
+taxonomy <- read_qza("LPSdiet_SILVA_132_99_16S_taxonomy_withspaces.qza")
+tree <- read_qza("rooted_tree.qza")
+```
+
+#### Make phyloseq object
+
+```{r import-2a}
+physeq <- qza_to_phyloseq(features = "LPSdiet_table.qza", 
+                          tree = "rooted_tree.qza", 
+                         taxonomy = "LPSdiet_SILVA_132_99_16S_taxonomy_withspaces.qza", 
+                          metadata = "GreenIguanaManifest_subset_reduced.txt")
+sample_data(physeq)$iguana_ID <- as.factor(sample_data(physeq)$iguana_ID)
+physeq
+```
+
+
+## Check to make sure samples in metadata and feature table match up
+
+```{r import-4a}
+meta.tsv <- meta.tsv %>% 
+  arrange(sample_ID)
+length(setdiff(meta.tsv$sample_ID, colnames(SVs$data)))
+(setdiff(meta.tsv$sample_ID, colnames(SVs$data)))
+length(setdiff(colnames(SVs$data), meta.tsv$sample_ID))
+(setdiff(colnames(SVs$data), meta.tsv$sample_ID))
+length(setdiff(rownames(SVs$data), taxonomy$data$Feature.ID))
+length(setdiff(taxonomy$data$Feature.ID, rownames(SVs$data)))
+```
+
+There are some missing samples. 
+This seems to be a matter of file names. GI34-GI66 have file names that start with G34-G66, 
+leaving off the I. This makes the sample names coming out of qiime different from those in 
+the metadata file.
+
+Changed this manually in `GreenIguanaManifest_subset_reduced.txt`.     
+Resaved as `GreenIguanaManifest_subset_reduced_IDedits.txt`
+
+This still leaves three missing: BG4, BG6, G63. Each had very small 
+files so probably did not survive filtering.
+
+# Remake the phyloseq object
+
+#### Import files
+
+Following vignette from Qiime2R     
+[https://rdrr.io/github/jbisanz/qiime2R/f/vignettes/vignette.Rmd].
+
+```{r import-1b}
+meta.tsv <- read_tsv("GreenIguanaManifest_subset_reduced_IDedits.txt")
+meta.tsv <- meta.tsv %>% mutate_all(as.factor)
+SVs <- read_qza("LPSdiet_table.qza")
+taxonomy <- read_qza("LPSdiet_SILVA_132_99_16S_taxonomy_withspaces.qza")
+tree <- read_qza("rooted_tree.qza")
+```
+
+#### Make phyloseq object
+
+```{r import-2b}
+physeq <- qza_to_phyloseq(features = "LPSdiet_table.qza", 
+                          tree = "rooted_tree.qza", 
+                         taxonomy = "LPSdiet_SILVA_132_99_16S_taxonomy_withspaces.qza", 
+                          metadata = "GreenIguanaManifest_subset_reduced_IDedits.txt")
+sample_data(physeq)$iguana_ID <- as.factor(sample_data(physeq)$iguana_ID)
+sample_data(physeq)$treat_time <- as.factor(paste(sample_data(physeq)$treatment, 
+                                                  sample_data(physeq)$timepoint, 
+                                                  sep = "_"))
+physeq
+```
+
+
+## Check to make sure samples in metadata and feature table match up
+
+```{r import-4b}
+meta.tsv <- meta.tsv %>% 
+  arrange(sample_ID)
+length(setdiff(meta.tsv$sample_ID, colnames(SVs$data)))
+(setdiff(meta.tsv$sample_ID, colnames(SVs$data)))
+length(setdiff(colnames(SVs$data), meta.tsv$sample_ID))
+(setdiff(colnames(SVs$data), meta.tsv$sample_ID))
+length(setdiff(rownames(SVs$data), taxonomy$data$Feature.ID))
+length(setdiff(taxonomy$data$Feature.ID, rownames(SVs$data)))
+```
+
+## Convert the taxonomy table into a tabular split version     
+
+Also check number of unique taxa in the taxonomy table and the tree    
+
+```{r import-5, eval=FALSE, include=FALSE, echo=FALSE}
+taxtable <- taxonomy$data %>% as.tibble() %>% separate(Taxon,
+  sep=";", c("Kingdom","Phylum","Class","Order","Family","Genus","Species"))
+head(taxtable)
+# How many unique taxa?
+length(unique(taxtable[["Feature.ID"]]))
+tree$data
+```
+
+There are 5,137 unique taxa. 
+
+Significantly fewer taxa than in the 3Y rock iguana study (7084)
+
+Inspect 
+
+
+```{r import-6}
+ntaxa(physeq)
+nsamples(physeq)
+sample_names(physeq)[1:5]
+rank_names(physeq)
+sample_variables(physeq)
+otu_table(physeq)[1:3, 1:3]
+tax_table(physeq)[100:103, 1:3]
+phy_tree(physeq)
+taxa_names(physeq)[1:10]
+```
+
+# Preprocessing     
+Following tutorial [https://joey711.github.io/phyloseq/preprocess.html]   
+
+## Filter mitochondria and chloroplast
+
+NOTE: The new version of physeq seems to recognize and remove all of the weird formatting 
+in the taxonomy. So in previous analyses I had to remove with the following text:    
+
+D_4__Mitochondria (Family)     
+D_3__Chloroplast (Order)     
+
+But when I do it that way now it misses some. So now I can just remove with:
+
+Mitochondria    
+Chloroplast     
+
+And it finds the same number as before. This seems sufficient. Running with 
+the old text afterward does not find any additional taxa to filter out.   
+
+
+```{r mtchloro-1}
+ntaxa(physeq)
+physeq_nomito <- subset_taxa(physeq, Family != "Mitochondria")
+ntaxa(physeq_nomito)
+physeq_nomitonochloro <- subset_taxa(physeq_nomito, Order != "Chloroplast")
+ntaxa(physeq_nomitonochloro)
+```
+
+627 mitochondria and 3 chloroplast   
+
+## Decontaminate
+
+Following https://benjjneb.github.io/decontam/vignettes/decontam_intro.html
+
+#### Inspect library sizes
+
+```{r decon-1a}
+all.samples.df <- as.data.frame(sample_data(physeq_nomitonochloro))
+#all.samples.df$controls <- as.factor(ifelse(all.samples.df$blank == "blank", "blank", "sample"))
+all.samples.df$LibrarySize <- sample_sums(physeq_nomitonochloro)
+all.samples.df <- all.samples.df[order(all.samples.df$LibrarySize),]
+all.samples.df$Index <- seq(nrow(all.samples.df))
+ggplot(data = all.samples.df, 
+       aes(x = Index, y = LibrarySize, color = blank )) + 
+  geom_point()
+ggplot(data = all.samples.df, 
+       aes(x = Index, y = LibrarySize, color = blank )) + 
+  ylim(0,1000) + 
+  geom_point()
+```
+
+Blanks have very few reads - all under 800
+
+#### Identify contaminants - Prevalence
+
+Identifies contaminants based on presence/absence across samples and controls.
+
+```{r decon-2}
+sample_data(physeq_nomitonochloro)$is.neg <- 
+  sample_data(physeq_nomitonochloro)$blank == "Y"
+contamdf.prev <- isContaminant(physeq_nomitonochloro, 
+                               method = "prevalence", neg="is.neg")
+table(contamdf.prev$contaminant)
+head(which(contamdf.prev$contaminant))
+contamdf.prev[contamdf.prev[,"contaminant"] == "TRUE",]
+```
+
+ 
+4504 non-contaminants and 3 contaminants at the 0.1 threshold
+
+Changing the threshold to 0.5 will identify contaminants as seqs that are \
+more prevalent in controls than in samples.
+
+```{r decon-3}
+contamdf.prev05 <- isContaminant(physeq_nomitonochloro, 
+                                 method = "prevalence", neg="is.neg",
+                                 threshold = 0.5)
+table(contamdf.prev05$contaminant)
+contamdf.prev05[contamdf.prev05[,"contaminant"] == "TRUE",]
+```
+
+There are 11 ASVs that are more prevalent in blanks than in samples. 
+
+#### Remove contaminants and blanks
+
+```{r decon-8}
+# remove contaminant taxa
+ntaxa(physeq_nomitonochloro)
+summary(sample_data(physeq_nomitonochloro)$sample_type)
+contams <- row.names(contamdf.prev05[contamdf.prev05[,"contaminant"] == "FALSE",])
+length(contams)
+ps.decon <- prune_taxa(contams, physeq_nomitonochloro)
+ps.decon
+# remove negative controls (blanks)
+ps.decon <- prune_samples(sample_data(ps.decon)$blank != "Y", ps.decon)
+nsamples(physeq_nomitonochloro)
+summary(sample_data(physeq_nomitonochloro)$blank)
+summary(sample_data(ps.decon)$blank)
+ps.decon
+```
+
+This went from 4507 to 4496
+
+Removing blanks takes number of samples from 206 to 182
+
+## Filter taxa
+
+#### Look at distribution of taxa by Phylum 
+
+```{r ftax-1}
+#table(tax_table(ps.decon) [, "Phylum"], exclude = NULL)
+ps.decon.ftax <- subset_taxa(ps.decon, !is.na(Phylum))
+ps.decon
+ps.decon.ftax
+```
+
+All taxa were assigned to a phylum - no change.
+
+#### Assess feature prevalence   
+
+How many samples does each taxa show up in at least once?   
+Are there phyla that are comprised of mostly low-prevalence features?   
+Compute the total and average prevalences of the features in each phylum.
+
+```{r ftax-2}
+# Compute prevalence of each feature, store as data.frame
+prevdf = apply(X = otu_table(ps.decon.ftax),
+                 MARGIN = ifelse(taxa_are_rows(ps.decon.ftax), yes = 1, no = 2),
+                 FUN = function(x){sum(x > 0)})
+# Add taxonomy and total read counts to this data.frame
+prevDF = data.frame(Prevalence = prevdf,
+                      TotalAbundance = taxa_sums(ps.decon.ftax),
+                      tax_table(ps.decon.ftax))
+```
+
+#### Prevalence vs total read count 
+
+In this plot, each point is a different taxa.   
+
+```{r ftax-3, fig.width = 12}
+ggplot(prevDF, aes(Prevalence, TotalAbundance)) + 
+  geom_point(size = 4, alpha = 0.75) + 
+  scale_y_log10()
+```
+
+It shows the fraction of samples that each taxa within a phylum are found in.   
+Use this to eyeball selection of a minimum prevalence cutoff.   
+For now, I set the dotted line at 5% to see if that seems like a reasonable cutoff.   
+
+```{r ftax-4, fig.width=12}
+ggplot(prevDF, aes(TotalAbundance, Prevalence / nsamples(ps.decon.ftax),
+                   color=Phylum)) + 
+  # Include a guess for parameter
+  geom_hline(yintercept = 0.05, alpha = 0.5, linetype = 2) + 
+  geom_point(size = 2, alpha = 0.7) +
+  scale_x_log10() +  xlab("Total Abundance") + 
+  ylab("Prevalence [Frac. Samples]") +
+  facet_wrap(~Phylum) + 
+  theme(legend.position="none")  
+```
+
+#### Plot the frequency of taxa
+
+```{r ftax-5}
+# Determine the cutoff for OTU filtering
+tdt = data.table(tax_table(ps.decon.ftax),
+                 TotalCounts = taxa_sums(ps.decon.ftax),
+                 OTU = taxa_names(ps.decon.ftax))
+tdt[(TotalCounts <= 2), .N]
+ggplot(tdt, aes(TotalCounts)) + 
+  geom_histogram() + 
+  ggtitle("Histogram of Total Counts")
+```
+
+
+```{r ftax-6}
+# taxa cumulative sum
+taxcumsum = tdt[, .N, by = TotalCounts]
+setkey(taxcumsum, TotalCounts)
+taxcumsum[, CumSum := cumsum(N)]
+# Define the plot
+pCumSum = ggplot(taxcumsum, aes(TotalCounts, CumSum)) + 
+  geom_point() +
+  xlab("Filtering Threshold, Minimum Total Counts") +
+  ylab("taxa Filtered") +
+  ggtitle("taxa that would be filtered vs. the minimum count threshold")
+pCumSum
+```
+
+Zoom-in
+
+```{r ftax-7}
+pCumSum + xlim(0, 30)
+```
+
+
+#### Remove taxa not seen more than 10 times in at least 1% (n = 2) samples   
+
+This somewhat matches what we did with the rock iguana 3Y study
+
+```{r ftax-8}
+prevalenceThreshold = 0.01 * nsamples(ps.decon.ftax)
+prevalenceThreshold = 2
+freqThreshold = 10
+keepTaxa <- rownames(prevDF)[prevDF$Prevalence >= 
+                               prevalenceThreshold & 
+                               prevDF$TotalAbundance > freqThreshold]
+length(keepTaxa)
+ps.decon.ftax
+ps.decon.ftax2 <- prune_taxa(keepTaxa, ps.decon.ftax)
+ps.decon.ftax2
+```
+
+Filtered taxa from 4496 to 1636 
+
+
+## Filter samples
+
+#### First get some summary statistics for sequencing depth
+
+
+```{r fsam-1}
+min(sample_sums(ps.decon.ftax2))
+max(sample_sums(ps.decon.ftax2))
+mean(sample_sums(ps.decon.ftax2))
+median(sample_sums(ps.decon.ftax2))
+sdt <- data.table(as(sample_data(ps.decon.ftax2), "data.frame"),
+                  TotalReads = sample_sums(ps.decon.ftax2), 
+                  keep.rownames = TRUE)
+setnames(sdt, "rn", "SampleID")
+ggplot(sdt, aes(TotalReads)) + 
+  geom_histogram() + 
+  ggtitle("sequencing depth") + 
+  xlab("read counts") 
+```
+
+
+
+Zoom-in
+
+```{r fsam-2}
+ggplot(sdt, aes(TotalReads)) + 
+  geom_histogram() + 
+  ggtitle("sequencing depth") + 
+  xlab("read counts") + 
+  xlim(0,1000) 
+```
+
+#### Remove samples with fewer than 1000 reads
+
+```{r fsam-3}
+nsamples(ps.decon.ftax2)
+ps.decon.ftax2.fsam <- prune_samples(sample_sums(ps.decon.ftax2) >= 1000, ps.decon.ftax2)
+nsamples(ps.decon.ftax2.fsam)
+sample_sums(ps.decon.ftax2.fsam)
+```
+
+This eliminates 12 samples. 
+Lowering the threshold to 500 reads only saves 2 additional samples.
+
+## Final pre-processing steps
+
+#### Rename to simplify
+
+```{r prep-1}
+ps <- ps.decon.ftax2.fsam
+```
+
+
+#### Transform and rarefy
+
+
+```{r prep-2a}
+ps.rab <- transform_sample_counts(ps, function(x) x/sum(x))
+ps.log <- transform_sample_counts(ps, function(x) log(1 + x))
+ps.rare <- rarefy_even_depth(ps, rngseed = 123)
+ps.rare.rab <- transform_sample_counts(ps.rare, function(x) x/sum(x))
+ps.rare.log <- transform_sample_counts(ps.rare, function(x) log(1 + x))
+min(sample_sums(ps.rare))
+max(sample_sums(ps.rare))
+# also make a non-filtered rarefied set for alpha diversity
+min(sample_sums(ps.decon))
+ps.decon.rare <- rarefy_even_depth(ps.decon, rngseed = 123, 
+                                   sample.size = 1159)
+ps.decon.rare
+```
+
+This leaves more taxa after rarefaction than in Feb 2022...
+
+
+###### Ordination plot
+
+PCoA with Bray-Curtis dissimilarity - Log-transformed data
+
+
+```{r pre-2b}
+ord.log.pcoa.bray.all <- ordinate(ps.log, method = "PCoA", distance = "bray")
+plot_ordination(ps.log, ord.log.pcoa.bray.all, type = "samples", 
+                color = "diet", shape = "timepoint") + 
+  geom_point(size = 4, alpha = 1) 
+```
+
+#### Subset
+
+###### Separate by Questions
+
+1. What is the effect of diet?    
+-Compare baseline vs pre-LPS1 timepoints in diet vs control     
+-Can ignore LPS treatment, because this was before LPS timepoint      
+
+
+```{r prep-3}
+ps.diet <- subset_samples(ps, timepoint == "baseline" | timepoint == "pre_LPS1")
+ps.diet
+# add a new variable
+sample_data(ps.diet)$diet_time <- paste(sample_data(ps.diet)$diet, 
+                                        sample_data(ps.diet)$timepoint, 
+                                        sep = "_")
+ps.diet
+```
+
+
+```{r prep-4}
+ps.diet.rab <- transform_sample_counts(ps.diet, function(x) x / sum(x) )
+ps.diet.log <- transform_sample_counts(ps.diet, function(x) log(1 + x))
+ps.decon.diet <- subset_samples(ps.decon, timepoint == "baseline" | timepoint == "pre_LPS1")
+sample_data(ps.decon.diet)$diet_time <- paste(sample_data(ps.decon.diet)$diet, 
+                                        sample_data(ps.decon.diet)$timepoint, 
+                                        sep = "_")
+ps.rare.diet <- subset_samples(ps.rare, timepoint == "baseline" | timepoint == "pre_LPS1")
+ps.rare.diet.rab <- transform_sample_counts(ps.rare.diet, function(x) x / sum(x) )
+ps.rare.diet.log <- transform_sample_counts(ps.rare.diet, function(x) log(1 + x))
+ps.decon.rare.diet <- subset_samples(ps.decon.rare, timepoint == "baseline" | timepoint == "pre_LPS1")
+sample_data(ps.decon.rare.diet)$diet_time <- paste(sample_data(ps.decon.rare.diet)$diet, 
+                                        sample_data(ps.decon.rare.diet)$timepoint, 
+                                        sep = "_")
+```
+
+
+```{r prep-5a}
+# post LPS1
+ps.intxALL <- subset_samples(ps, timepoint == "24hr_post_LPS1" | timepoint == "72hr_post_LPS1" | timepoint == "pre_biopsy")
+ps.intxALL
+ps.intxALL.rab <- transform_sample_counts(ps.intxALL, function(x) x / sum(x) )
+ps.intxALL.log <- transform_sample_counts(ps.intxALL, function(x) log(1 + x))
+ps.decon.intxALL <- subset_samples(ps.decon, timepoint == "24hr_post_LPS1" | timepoint == "72hr_post_LPS1" | timepoint == "pre_biopsy")
+ps.rare.intxALL <- subset_samples(ps.rare, timepoint == "24hr_post_LPS1" | timepoint == "72hr_post_LPS1" | timepoint == "pre_biopsy")
+ps.rare.intxALL.rab <- transform_sample_counts(ps.intxALL, function(x) x / sum(x) )
+ps.rare.intxALL.log <- transform_sample_counts(ps.intxALL, function(x) log(1 + x))
+ps.decon.rare.intxALL <- subset_samples(ps.decon.rare, timepoint == "24hr_post_LPS1" | timepoint == "72hr_post_LPS1" | timepoint == "pre_biopsy")
+```
+
+PCoA with Bray-Curtis dissimilarity - Log-transformed data
+
+
+```{r prep-5b}
+ord.log.pcoa.bray.intxALL <- ordinate(ps.intxALL.log, method = "PCoA", distance = "bray")
+plot_ordination(ps.intxALL.log, ord.log.pcoa.bray.intxALL, type = "samples", 
+                color = "treat_time", shape = "treatment") + 
+  geom_point(size = 4, alpha = 1) 
+```
+
+
+```{r prep-5c}
+# 24 hr
+ps.intx24 <- subset_samples(ps, timepoint == "24hr_post_LPS1")
+ps.intx24
+ps.intx24.rab <- transform_sample_counts(ps.intx24, function(x) x / sum(x) )
+ps.intx24.log <- transform_sample_counts(ps.intx24, function(x) log(1 + x))
+ps.decon.intx24 <- subset_samples(ps.decon, timepoint == "24hr_post_LPS1")
+ps.rare.intx24 <- subset_samples(ps.rare, timepoint == "24hr_post_LPS1")
+ps.rare.intx24.rab <- transform_sample_counts(ps.rare.intx24, function(x) x / sum(x) )
+ps.rare.intx24.log <- transform_sample_counts(ps.rare.intx24, function(x) log(1 + x))
+ps.decon.rare.intx24 <- subset_samples(ps.decon.rare, timepoint == "24hr_post_LPS1")
+# 72 hr
+ps.intx72 <- subset_samples(ps, timepoint == "72hr_post_LPS1")
+ps.intx72
+ps.intx72.rab <- transform_sample_counts(ps.intx72, function(x) x / sum(x) )
+ps.intx72.log <- transform_sample_counts(ps.intx72, function(x) log(1 + x))
+ps.decon.intx72 <- subset_samples(ps.decon, timepoint == "72hr_post_LPS1")
+ps.rare.intx72 <- subset_samples(ps.rare, timepoint == "72hr_post_LPS1")
+ps.rare.intx72.rab <- transform_sample_counts(ps.rare.intx72, function(x) x / sum(x) )
+ps.rare.intx72.log <- transform_sample_counts(ps.rare.intx72, function(x) log(1 + x))
+ps.decon.rare.intx72 <- subset_samples(ps.decon.rare, timepoint == "72hr_post_LPS1")
+# pre_biopsy
+ps.intxPRE <- subset_samples(ps, timepoint == "pre_biopsy")
+ps.intxPRE
+ps.intxPRE.rab <- transform_sample_counts(ps.intxPRE, function(x) x / sum(x) )
+ps.intxPRE.log <- transform_sample_counts(ps.intxPRE, function(x) log(1 + x))
+ps.decon.intxPRE <- subset_samples(ps.decon, timepoint == "pre_biopsy")
+ps.rare.intxPRE <- subset_samples(ps.rare, timepoint == "pre_biopsy")
+ps.rare.intxPRE.rab <- transform_sample_counts(ps.rare.intxPRE, function(x) x / sum(x) )
+ps.rare.intxPRE.log <- transform_sample_counts(ps.rare.intxPRE, function(x) log(1 + x))
+ps.decon.rare.intxPRE <- subset_samples(ps.decon.rare, timepoint == "pre_biopsy")
+```
+
+# General microbiome features
+
+```{r bar-1}
+# by phylum
+ps.phylum <- ps %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.02) %>%                         # Filter out low abundance taxa
+  arrange(Phylum)                                      # Sort data frame alphabetically by phylum
+levels(as.factor(ps.phylum$Phylum))
+```
+
+
+
+
+#### Bar Plot 
+
+Colors came from 64-color panel here:
+http://godsnotwheregodsnot.blogspot.com/2012/09/color-distribution-methodology.html
+
+```{r bar-4}
+#svg("green_barplot_phylum.svg")
+p.ps.bar.phylum <- ggplot(ps.phylum, 
+                               aes(x = Sample,
+                                         y=Abundance, 
+                                         fill = Phylum)) +
+  geom_bar(stat="identity") + coord_flip() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),) +
+  ylab("Relative Abundance (Phyla > 2%)") + 
+  xlab("Sample") + 
+  ylim(0,1)  + 
+  scale_fill_manual(values = c("Actinobacteria" = "#DAF7A6", 
+                                "Bacteroidetes" = "#55828B", 
+                                "Cyanobacteria" = "#0086ED",
+                                "Deinococcus-Thermus" = "#D10374",
+                                "Euryarchaeota" = "#666666",
+                                "Firmicutes" = "#BC23FF",
+                                "Planctomycetes" = "#0D9F3F",
+                                "Proteobacteria" = "#0AA6D8",
+                                "Spirochaetes" = "#E6AB02",
+                                "Tenericutes" = "#372101",
+                                "Verrucomicrobia" = "#8C1567"))
+ggsave(file = "green_barplot_phylum.svg", plot = p.ps.bar.phylum)
+#print(p.ps.bar.phylum)
+#dev.off()
+p.ps.bar.phylum
+```
+
+
+#### Summary Data
+
+```{r sum-1}
+# number of reads
+mean(sample_sums(ps))
+sd(sample_sums(ps))
+table(sample_data(ps)$iguana_ID)
+# number of ASVs
+ps.richness <- estimate_richness(ps,split=TRUE, 
+                                  measures = c("Observed"))
+ps.richness %>%
+  summarise_at(vars(Observed), funs(mean(., na.rm = TRUE),
+                                    sd(., na.rm = TRUE)))
+```
+
+
+# Question 1. What is the effect of diet?
+
+## Barplots
+
+
+Plot the relative abundance of Phyla that contribute more than 2% of the \
+relative abundance of each sample. 
+Prune out the low abundance taxa for this visualization.
+Following http://deneflab.github.io/MicrobeMiseq/demos/mothur_2_phyloseq.html.
+
+#### Get top phyla
+
+```{r d.bar-1}
+# by phylum
+ps.diet_phylum <- ps.diet %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.02) %>%                         # Filter out low abundance taxa
+  arrange(Phylum)                                      # Sort data frame alphabetically by phylum
+levels(as.factor(ps.diet_phylum$Phylum))
+```
+
+When I ran this in Feb with a different version of Phyloseq, 
+this produced 16 Phyla. But now there are only 11. Those missing include:    
+
+- Acidobacteria     
+- Dependentiae     
+- Elusimicrobia     
+- Lentisphaerae     
+- Synergistetes     
+
+When I skip the filtering step, all 16 taxa are there...   
+
+
+In the barplot from Feb 22, it is clear that only these 11 Phyla are 
+included. So there must be a version control difference here or the 
+fact that now I am calling them as factors. I think this just has to 
+do with the way it is reading the empty levels or not.
+
+
+```{r d.bar-2}
+ps.diet_phylum$sample_type_order_n[ps.diet_phylum$timepoint == "baseline" & 
+                                  ps.diet_phylum$diet == "w"] <- 1
+ps.diet_phylum$sample_type_order_n[ps.diet_phylum$timepoint == "baseline" & 
+                                  ps.diet_phylum$diet == "g"] <- 2
+ps.diet_phylum$sample_type_order_n[ps.diet_phylum$timepoint == "pre_LPS1" & 
+                                  ps.diet_phylum$diet == "w"] <- 3
+ps.diet_phylum$sample_type_order_n[ps.diet_phylum$timepoint == "pre_LPS1" & 
+                                  ps.diet_phylum$diet == "g"] <- 4
+```
+
+
+#### Make a reordering variable
+
+```{r d.bar-3}
+ps.diet_phylum$comboID <- paste(ps.diet_phylum$sample_type_order_n, 
+                                ps.diet_phylum$Sample, sep = "_")
+```
+
+#### Plot 
+
+Colors came from 64-color panel here:
+http://godsnotwheregodsnot.blogspot.com/2012/09/color-distribution-methodology.html
+
+```{r d.bar-4}
+#svg("green_barplot_phylum_diet.svg")
+p.ps.bar.phylum.diet <- ggplot(ps.diet_phylum, 
+                               aes(x=reorder(comboID, -sample_type_order_n), 
+                                         y=Abundance, 
+                                         fill = Phylum)) +
+  geom_bar(stat="identity") + coord_flip() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),) +
+  ylab("Relative Abundance (Phyla > 2%)") +
+  xlab("Sample") + 
+  ylim(0,1)  + 
+  scale_fill_manual(values = c("Acidobacteria" = "#DAF7A6",
+                               "Actinobacteria" = "#8FCAFF", 
+                                "Bacteroidetes" = "#55828B", 
+                                "Cyanobacteria" = "#0086ED",
+                                "Deinococcus-Thermus" = "#D10374",
+                               "Dependentiae" = "#BC23FF", 
+                               "Elusimicrobia" = "#A77500", 
+                                "Euryarchaeota" = "#666666",
+                                "Firmicutes" = "#F79936",
+                                "Lentisphaerae" = "#7570B3",
+                                "Planctomycetes" = "#0D9F3F",
+                                "Proteobacteria" = "#0AA6D8",
+                                "Spirochaetes" = "#E6AB02",
+                                "Synergistetes" = "#1B9E77",
+                                "Tenericutes" = "#372101",
+                                "Verrucomicrobia" = "#8C1567"))
+ggsave(file = "green_barplot_phylum_diet.svg", p.ps.bar.phylum.diet)
+#print(p.ps.bar.phylum.diet)
+#dev.off()
+p.ps.bar.phylum.diet
+```
+
+
+
+## Ordination plots
+
+PCoA with Bray-Curtis dissimilarity - Log-transformed data
+
+
+```{r d.ordination-1}
+ord.log.pcoa.bray.diet <- ordinate(ps.diet.log, method = "PCoA", distance = "bray")
+plot_ordination(ps.diet.log, ord.log.pcoa.bray.diet, type = "samples", 
+                color = "diet", shape = "timepoint") + 
+  geom_point(size = 4, alpha = 1) + 
+  scale_shape_manual(values = c(15,19,17,18)) + 
+  scale_color_manual(values = c("#55828b","#94d2bd")) 
+```
+
+Color differently
+
+```{r ordination-2}
+#svg("PCA_diet.svg")
+p.pca.diet <- plot_ordination(ps.diet.log, 
+                              ord.log.pcoa.bray.diet, 
+                              type = "samples", 
+                              color = "diet_time",
+                              shape = "timepoint") +  
+  geom_point(size = 4, alpha = 1) + 
+ # geom_text(aes(label = iguana_ID, color = NULL)) + 
+  scale_shape_manual(values = c(8,17)) + 
+  scale_color_manual(values = c("navy", "navy",  "steelblue1", "steelblue1" ), 
+                     name = "Treatment group") + 
+  scale_fill_manual(values = c("white")) + 
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+        axis.line = element_line()) 
+ggsave(file = "PCA_diet.svg", p.pca.diet)
+#print(p.pca.diet)
+p.pca.diet
+#dev.off()
+```
+
+
+## Community differences on relative abundance
+
+Following advice from https://github.com/joey711/phyloseq/issues/689.
+I am using distance matrices based on relative abundance as a normalization method, \
+but can repeat with rarefied data. 
+In the second instance, I stratified permutations across 
+iguana. This should deal with repeated sampling.
+
+
+
+```{r d.adonis-1}
+bc.ps.t.diet <- phyloseq::distance(ps.diet.rab, method = "bray")
+samples.ps.diet <- phyloseq::sample_data(ps.diet.rab)
+adonis.ps.t.diet <- vegan::adonis2(bc.ps.t.diet ~ samples.ps.diet$diet * samples.ps.diet$timepoint, 
+                                permutations = 9999,
+                                strata=samples.ps.diet$iguana_ID)
+adonis.ps.t.diet
+```
+
+Highly significant differences.
+
+Do pairwise testing
+
+```{r d.adonis-2}
+pw_adonis.ps.t.diet <- pairwise.perm.manova(bc.ps.t.diet, 
+                                            samples.ps.diet$diet_time, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_adonis.ps.t.diet
+```
+
+Looks like there is no difference between glucose and control at baseline.
+(Good - we expect that.)
+Then glucose and control both change over time, but in divergent ways.
+
+## Dispersion
+
+It is important to know how much of thes significnat differences in overall 
+microbiome composition found with adonis are due to differences in dispersion 
+(i.e., variance) within the sample type.
+
+**Based on relative abundance**
+
+
+```{r d.dispersion-1}
+beta.ps.t.diet <- betadisper(bc.ps.t.diet, 
+                          samples.ps.diet$diet_time, 
+                          bias.adjust = TRUE)
+beta.ps.t.diet
+beta.ps.t.diet.an <- anova(beta.ps.t.diet)
+beta.ps.t.diet.an
+beta.ps.t.diet.test <- permutest(beta.ps.t.diet, 
+                            control = permControl(nperm = 9999),  
+                            pairwise=TRUE)
+beta.ps.t.diet.test
+beta.ps.t.diet.HSD <- TukeyHSD(beta.ps.t.diet)
+beta.ps.t.diet.HSD
+```
+
+No differences in beta diversity
+
+## Alpha diversity
+
+
+#### Estimate diversity
+
+Using a non-filtered phyloseq object after warning received when using 'ps'. \
+Warning said better to use non-filtered data. It detected this based on few \
+singletons.
+
+
+```{r d.alpha-1}
+samples.ps.decon.diet <- phyloseq::sample_data(ps.decon.diet)
+diet.ps.shannon <- estimate_richness(ps.decon.diet,split=TRUE, 
+                                  measures = c("Observed","Shannon"))
+samples.ps.diet.shannon <- merge(samples.ps.decon.diet, 
+                              diet.ps.shannon, 
+                              by=0, all = TRUE)
+```
+
+
+NOTE: This generates a warning error about singletons. 
+However, this does not apply to the Shannon index. 
+
+From https://github.com/benjjneb/dada2/issues/214 
+
+> DADA2 does not call singletons, due to the difficulty of differentiating rare singleton errors from real singleton variants.
+This means you should not use the output of DADA2 to estimate richness (eg. Chao S1). However, you shouldn't have been doing that with the output of other methods either, as the high levels of FP singletons made richness estimates wrong anyway. Right now, I don't think a method exists that can make valid richness estimates from high-throughput amplicon data due to the difficulty of calling singletons accurately, and the sensitivity of richness estimation to the number of singletons.
+Other measures of diversity that aren't totally reliant on singletons, eg. Shannon/Simpson, are valid to use, and you can ignore the warning in phyloseq when calculating those measures.
+
+#### Shannon Index
+
+###### Plot distribution
+
+```{r d.alpha-2}
+histogram(samples.ps.diet.shannon$Shannon)
+qqp(samples.ps.diet.shannon$Shannon, "norm")
+ad.test(samples.ps.diet.shannon$Shannon)
+descdist(samples.ps.diet.shannon$Shannon, boot = 50)
+# log
+histogram(log(samples.ps.diet.shannon$Shannon))
+qqp(log(samples.ps.diet.shannon$Shannon), "norm")
+
+```
+
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We need to include iguana ID as a random effect, because each iguana was sampled twice.
+
+```{r d.alpha-3}
+# no transformation
+d.shannon.m0 <- lmer(Shannon ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon,
+                       REML = FALSE)
+summary(d.shannon.m0)
+Anova(d.shannon.m0)
+```
+
+Use box-cox transformation
+
+```{r d.alpha-4a}
+bc.shannon.d <- boxcox(Shannon ~  diet_time , 
+                         data = samples.ps.diet.shannon)
+trans.shannon.d <- bc.shannon.d$x[which.max(bc.shannon.d$y)]
+trans.shannon.d
+```
+
+
+```{r d.alpha-4b}
+d.shannon.m1 <- lmer(Shannon^trans.shannon.d ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon, 
+                       REML = FALSE)
+summary(d.shannon.m1)
+Anova(d.shannon.m1)
+#emmeans(d.shannon.m1, list(pairwise ~ diet_time), adjust = "tukey")
+```
+
+No significant difference in alpha diversity.
+
+###### Group medians
+
+```{r d.alpha-5}
+samples.ps.diet.shannon %>%
+  group_by(diet_time) %>% 
+  summarise_at(vars(Shannon), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r d.alpha-6}
+#svg("alpha_Shannon_diet.svg")
+p.alpha.shannon.diet <- ggplot(samples.ps.diet.shannon, aes(x = diet_time, 
+                                    y = Shannon, 
+                                    fill = diet_time)) + 
+        geom_boxplot() + 
+        annotate("text",x=1,y=5.1,label="a") +
+        annotate("text",x=2,y=5.1,label="a") +
+        annotate("text",x=3,y=5.1,label="a") +
+        annotate("text",x=4,y=5.1,label="a") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_fill_manual(values = c("navy", "navy","steelblue1", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "alpha_Shannon_diet.svg", plot = p.alpha.shannon.diet)
+#print(p.alpha.shannon.diet)
+#dev.off()
+p.alpha.shannon.diet
+```
+
+
+#### Species richness
+
+###### Plot distribution
+
+```{r d.alpha-7}
+histogram(samples.ps.diet.shannon$Observed)
+qqp(samples.ps.diet.shannon$Observed, "norm")
+ad.test(samples.ps.diet.shannon$Observed)
+descdist(samples.ps.diet.shannon$Observed, boot = 50)
+# log
+histogram(log(samples.ps.diet.shannon$Observed))
+qqp(log(samples.ps.diet.shannon$Observed), "norm")
+
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+
+```{r d.alpha-8}
+# no transformation
+d.shannon.m0 <- lmer(Observed ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon,
+                       REML = FALSE)
+summary(d.shannon.m0)
+Anova(d.shannon.m0)
+```
+
+
+
+```{r d.alpha-9}
+bc.observed.d <- boxcox(Observed ~  diet_time , 
+                         data = samples.ps.diet.shannon)
+trans.observed.d <- bc.observed.d$x[which.max(bc.observed.d$y)]
+trans.observed.d
+```
+
+```{r d.alpha-10a}
+d.observed.m1 <- lmer(Observed^trans.observed.d ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon, 
+                       REML = FALSE)
+summary(d.observed.m1)
+Anova(d.observed.m1)
+#emmeans(d.observed.m1, list(pairwise ~ diet_time), adjust = "tukey")
+```
+
+###### Group medians
+
+```{r d.alpha-10b}
+samples.ps.diet.shannon %>%
+  group_by(diet_time) %>% 
+  summarise_at(vars(Observed), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r d.alpha-11}
+#svg("richness_diet.svg")
+p.richness.diet <- ggplot(samples.ps.diet.shannon, aes(x = diet_time, 
+                                    y = Observed, 
+                                 fill = diet_time, 
+                                 color = diet_time)) + 
+        geom_boxplot(lwd = 1) + 
+        annotate("text",x=1,y=475,label="a") +
+        annotate("text",x=2,y=475,label="a") +
+        annotate("text",x=3,y=475,label="a") +
+        annotate("text",x=4,y=475,label="a") +
+        scale_y_continuous(name = "Observed ASVs") +
+        #scale_x_discrete(name = "Dose", 
+        #                 labels=c("High", 
+        #                          "Low")) +  
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_fill_manual(values = c("white", "white", "white", "white")) + 
+  scale_color_manual(values = c("navy", "navy","steelblue1", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "richness_diet.svg", plot = p.richness.diet)
+#print(p.richness.diet)
+#dev.off()
+p.richness.diet
+```
+
+Overall, diet does not have a significant effect on alpha diversity.
+
+Could do more here with differential abundance, but let's move on to LPS x diet.
+
+
+
+# Question 2: How does diet influence immune response?
+
+2. How does diet interact with immune challenge in short and long-term?
+
+-Compare glucose X LPS
+
+-Analyze 24 hr, 72 hr, pre_biopsy time points separately
+
+## Barplots
+
+
+Plot the relative abundance of Phyla that contribute more than 2% of the \
+relative abundance of each sample. 
+Prune out the low abundance taxa for this visualization.
+Following http://deneflab.github.io/MicrobeMiseq/demos/mothur_2_phyloseq.html.
+
+### 24 hr 
+
+#### Get top phyla
+
+
+```{r i.bar-1}
+ps.intx24_phylum <- ps.intx24 %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.02) %>%                         # Filter out low abundance taxa
+  arrange(Phylum)                                      # Sort data frame alphabetically by phylum
+levels(as.factor(ps.intx24_phylum$Phylum))
+```
+
+There are 10 phyla
+
+```{r i.bar-2}
+ps.intx24_phylum$sample_type_order_n[ps.intx24_phylum$treatment == "G-L"] <- 1
+ps.intx24_phylum$sample_type_order_n[ps.intx24_phylum$treatment == "W-L"] <- 2
+ps.intx24_phylum$sample_type_order_n[ps.intx24_phylum$treatment == "G-C"] <- 3
+ps.intx24_phylum$sample_type_order_n[ps.intx24_phylum$treatment == "W-C"] <- 4
+```
+
+
+#### Make a reordering variable
+
+```{r i.bar-3}
+ps.intx24_phylum$comboID <- paste(ps.intx24_phylum$sample_type_order_n, 
+                                  ps.intx24_phylum$Sample, sep = "_")
+```
+
+#### Plot 
+
+Colors came from 64-color panel here:
+http://godsnotwheregodsnot.blogspot.com/2012/09/color-distribution-methodology.html
+
+```{r i.bar-4}
+svg("green_barplot_phylum_intx24.svg")
+p.ps.bar.phylum.intx24 <- ggplot(ps.intx24_phylum, aes(x=reorder(comboID, -sample_type_order_n), 
+                                         y=Abundance, 
+                                         fill = Phylum)) +
+  geom_bar(stat="identity") + coord_flip() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),) +
+  ylab("Relative Abundance (Phyla > 2%)") +
+  xlab("Sample") + 
+  ylim(0,1)  + 
+  scale_fill_manual(values = c("Actinobacteria" = "#DAF7A6", 
+                                "Bacteroidetes" = "#55828B", 
+                                "Cyanobacteria" = "#0086ED",
+                                "Deinococcus-Thermus" = "#D10374",
+                                "Euryarchaeota" = "#666666",
+                                "Firmicutes" = "#BC23FF",
+                                "Planctomycetes" = "#0D9F3F",
+                                "Proteobacteria" = "#0AA6D8",
+                                "Spirochaetes" = "#E6AB02",
+                                "Tenericutes" = "#372101",
+                                "Verrucomicrobia" = "#8C1567"))
+print(p.ps.bar.phylum.intx24)
+dev.off()
+p.ps.bar.phylum.intx24
+```
+
+Maybe larger shifts in Firmicutes with LPS treatment?
+
+### 72 hr 
+
+#### Get top phyla
+
+
+```{r i.bar-5}
+ps.intx72_phylum <- ps.intx72 %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.02) %>%                         # Filter out low abundance taxa
+  arrange(Phylum)                                      # Sort data frame alphabetically by phylum
+levels(as.factor(ps.intx72_phylum$Phylum))
+```
+
+There are 10 phyla
+
+```{r i.bar-6}
+ps.intx72_phylum$sample_type_order_n[ps.intx72_phylum$treatment == "G-L"] <- 1
+ps.intx72_phylum$sample_type_order_n[ps.intx72_phylum$treatment == "W-L"] <- 2
+ps.intx72_phylum$sample_type_order_n[ps.intx72_phylum$treatment == "G-C"] <- 3
+ps.intx72_phylum$sample_type_order_n[ps.intx72_phylum$treatment == "W-C"] <- 4
+table(ps.intx72_phylum$treatment)
+table(ps.intx72_phylum$sample_type_order_n)
+```
+
+
+#### Make a reordering variable
+
+```{r i.bar-7}
+ps.intx72_phylum$comboID <- paste(ps.intx72_phylum$sample_type_order_n, 
+                                  ps.intx72_phylum$Sample, sep = "_")
+```
+
+#### Plot 
+
+Colors came from 64-color panel here:
+http://godsnotwheregodsnot.blogspot.com/2012/09/color-distribution-methodology.html
+
+```{r i.bar-8}
+#svg("green_barplot_phylum_intx72.svg")
+p.ps.bar.phylum.intx72 <- ggplot(ps.intx72_phylum, aes(x=reorder(comboID, -sample_type_order_n), 
+                                         y=Abundance, 
+                                         fill = Phylum)) +
+  geom_bar(stat="identity") + coord_flip() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),) +
+  ylab("Relative Abundance (Phyla > 2%)") +
+  xlab("Sample") + 
+  ylim(0,1)  + 
+  scale_fill_manual(values = c("Actinobacteria" = "#DAF7A6", 
+                                "Bacteroidetes" = "#55828B", 
+                                "Cyanobacteria" = "#0086ED",
+                                "Deinococcus-Thermus" = "#D10374",
+                                "Euryarchaeota" = "#666666",
+                                "Firmicutes" = "#BC23FF",
+                                "Planctomycetes" = "#0D9F3F",
+                                "Proteobacteria" = "#0AA6D8",
+                                "Spirochaetes" = "#E6AB02",
+                                "Tenericutes" = "#372101",
+                                "Verrucomicrobia" = "#8C1567"))
+ggsave(file = "green_barplot_phylum_intx72.svg", plot = p.ps.bar.phylum.intx72)
+#print(p.ps.bar.phylum.intx72)
+#dev.off()
+p.ps.bar.phylum.intx72
+```
+
+### Pre-biopsy
+
+#### Get top phyla
+
+
+```{r i.bar-10}
+ps.intxPRE_phylum <- ps.intxPRE %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.02) %>%                         # Filter out low abundance taxa
+  arrange(Phylum)                                      # Sort data frame alphabetically by phylum
+levels(as.factor(ps.intxPRE_phylum$Phylum))
+```
+
+There are 9 phyla
+
+```{r i.bar-11}
+ps.intxPRE_phylum$sample_type_order_n[ps.intxPRE_phylum$treatment == "G-L"] <- 1
+ps.intxPRE_phylum$sample_type_order_n[ps.intxPRE_phylum$treatment == "W-L"] <- 2
+ps.intxPRE_phylum$sample_type_order_n[ps.intxPRE_phylum$treatment == "G-C"] <- 3
+ps.intxPRE_phylum$sample_type_order_n[ps.intxPRE_phylum$treatment == "W-C"] <- 4
+```
+
+
+#### Make a reordering variable
+
+```{r i.bar-12}
+ps.intxPRE_phylum$comboID <- paste(ps.intxPRE_phylum$sample_type_order_n, 
+                                  ps.intxPRE_phylum$Sample, sep = "_")
+```
+
+#### Plot 
+
+Colors came from 64-color panel here:
+http://godsnotwheregodsnot.blogspot.com/2012/09/color-distribution-methodology.html
+
+```{r i.bar-13}
+#svg("green_barplot_phylum_intxPRE.svg")
+p.ps.bar.phylum.intxPRE <- ggplot(ps.intxPRE_phylum, aes(x=reorder(comboID, -sample_type_order_n), 
+                                         y=Abundance, 
+                                         fill = Phylum)) +
+  geom_bar(stat="identity") + coord_flip() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),) +
+  ylab("Relative Abundance (Phyla > 2%)") +
+  xlab("Sample") + 
+  ylim(0,1)  + 
+  scale_fill_manual(values = c("Actinobacteria" = "#DAF7A6", 
+                                "Bacteroidetes" = "#55828B", 
+                                "Cyanobacteria" = "#0086ED",
+                                "Deinococcus-Thermus" = "#D10374",
+                                "Euryarchaeota" = "#666666",
+                                "Firmicutes" = "#BC23FF",
+                                "Planctomycetes" = "#0D9F3F",
+                                "Proteobacteria" = "#0AA6D8",
+                                "Spirochaetes" = "#E6AB02",
+                                "Tenericutes" = "#372101",
+                                "Verrucomicrobia" = "#8C1567"))
+ggsave(file = "green_barplot_phylum_intxPRE.svg", plot = p.ps.bar.phylum.intxPRE)
+#print(p.ps.bar.phylum.intxPRE)
+#dev.off()
+p.ps.bar.phylum.intxPRE
+```
+
+
+## Ordination plots
+
+PCoA with Bray-Curtis dissimilarity - Log-transformed data
+
+#### 24 hr
+
+```{r i.ordination-1}
+ord.log.pcoa.bray.intx24 <- ordinate(ps.intx24.log, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+#svg("PCA_intx24.svg")
+p.pca.intx24 <- plot_ordination(ps.intx24.log, ord.log.pcoa.bray.intx24, 
+                type = "samples", 
+                color = "diet") + 
+  geom_point(aes(fill = treatment, shape = lps), 
+             size = 5, alpha = 1) + 
+  scale_shape_manual(values = c(21, 21)) + 
+  scale_color_manual(values = c("navy", "steelblue1")) + 
+  scale_fill_manual(values = c("white","navy", "white" , "steelblue1" )) +
+  theme(axis.text.x = element_text(size=14),
+        axis.text.y = element_text(size = 12),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+        axis.line = element_line())  
+ggsave(file = "PCA_intx24.svg", plot = p.pca.intx24)
+#print(p.pca.intx24)
+#dev.off()
+p.pca.intx24
+```
+
+Color differently
+
+```{r i.ordination-2}
+ord.log.pcoa.bray.intx24 <- ordinate(ps.intx24.log, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+plot_ordination(ps.intx24.log, ord.log.pcoa.bray.intx24, 
+                type = "samples", 
+                color = "treatment", 
+                shape = "lps") + 
+  geom_point(size = 4, alpha = 1) + 
+  scale_shape_manual(values = c(15,19,17,18)) 
+#  scale_color_manual(values = c("#55828b","#94d2bd")) 
+```
+
+#### 72 hr
+
+```{r i.ordination-3}
+ord.log.pcoa.bray.intx72 <- ordinate(ps.intx72.log, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+plot_ordination(ps.intx72.log, ord.log.pcoa.bray.intx72, 
+                type = "samples", 
+                color = "lps", 
+                shape = "diet") + 
+  geom_point(size = 4, alpha = 1) + 
+  scale_shape_manual(values = c(15,19,17,18)) + 
+  scale_color_manual(values = c("#55828b","#94d2bd")) 
+```
+
+Color differently
+
+```{r i.ordination-4}
+ord.log.pcoa.bray.intx72 <- ordinate(ps.intx72.log, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+plot_ordination(ps.intx72.log, ord.log.pcoa.bray.intx72, 
+                type = "samples", 
+                color = "treatment", 
+                shape = "lps", 
+                label = "iguana_ID") + 
+  geom_point(size = 4, alpha = 1) + 
+  scale_shape_manual(values = c(15,19,17,18)) 
+#  scale_color_manual(values = c("#55828b","#94d2bd")) 
+```
+
+Check on these outliers: iguana 34 (W-C) & 35 (W-L) at 72 hr     
+Qubit reading for 35 was too low (per Erin Lewis), so probably whatever 
+amplified was contamination.    
+No notes on 34     
+Removing both.
+
+```{r i.ordination-4b}
+remove.72 <- c("34", "35")
+ps.intx72.r <- subset_samples(ps.intx72, !(iguana_ID %in% remove.72))
+ps.intx72
+ps.intx72.r
+ps.intx72.log.r <- subset_samples(ps.intx72.log, 
+                                  !(iguana_ID %in% remove.72))
+ps.intx72.rab.r <- subset_samples(ps.intx72.rab, 
+                                  !(iguana_ID %in% remove.72))
+```
+
+
+Redo the pCA
+
+```{r i.ordination-4c}
+ord.log.pcoa.bray.intx72.r <- ordinate(ps.intx72.log.r, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+#svg("PCA_intx72.svg")
+p.pca.intx72 <- plot_ordination(ps.intx72.log.r, ord.log.pcoa.bray.intx72.r, 
+                type = "samples", 
+                color = "diet") + 
+  geom_point(aes(fill = treatment, shape = lps), 
+             size = 5, alpha = 1) + 
+  scale_shape_manual(values = c(21, 21)) + 
+  scale_color_manual(values = c("navy", "steelblue1")) + 
+  scale_fill_manual(values = c("white","navy", "white" , "steelblue1" )) +
+  theme(axis.text.x = element_text(size=14),
+        axis.text.y = element_text(size = 12),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+        axis.line = element_line())  
+ggsave(file = "PCA_intx72.svg", plot = p.pca.intx72)
+#print(p.pca.intx72)
+#dev.off()
+p.pca.intx72
+```
+
+###### Redo the barplot after removing outliers
+
+Get top phyla
+
+
+```{r i.bar-5b}
+ps.intx72_phylum.r <- ps.intx72.r %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.02) %>%                         # Filter out low abundance taxa
+  arrange(Phylum)                                      # Sort data frame alphabetically by phylum
+levels(as.factor(ps.intx72_phylum.r$Phylum))
+```
+
+There are 10 phyla
+
+```{r i.bar-6b}
+ps.intx72_phylum.r$sample_type_order_n[ps.intx72_phylum.r$treatment == "G-L"] <- 1
+ps.intx72_phylum.r$sample_type_order_n[ps.intx72_phylum.r$treatment == "W-L"] <- 2
+ps.intx72_phylum.r$sample_type_order_n[ps.intx72_phylum.r$treatment == "G-C"] <- 3
+ps.intx72_phylum.r$sample_type_order_n[ps.intx72_phylum.r$treatment == "W-C"] <- 4
+table(ps.intx72_phylum.r$treatment)
+table(ps.intx72_phylum.r$sample_type_order_n)
+```
+
+
+Make a reordering variable
+
+```{r i.bar-7b}
+ps.intx72_phylum.r$comboID <- paste(ps.intx72_phylum.r$sample_type_order_n, 
+                                  ps.intx72_phylum.r$Sample, sep = "_")
+```
+
+Plot 
+
+Colors came from 64-color panel here:
+http://godsnotwheregodsnot.blogspot.com/2012/09/color-distribution-methodology.html
+
+```{r i.bar-8b}
+#svg("green_barplot_phylum_intx72_noOutliers.svg")
+p.ps.bar.phylum.intx72.r <- ggplot(ps.intx72_phylum.r, aes(x=reorder(comboID, -sample_type_order_n), 
+                                         y=Abundance, 
+                                         fill = Phylum)) +
+  geom_bar(stat="identity") + coord_flip() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),) +
+  ylab("Relative Abundance (Phyla > 2%)") +
+  xlab("Sample") + 
+  ylim(0,1)  + 
+  scale_fill_manual(values = c("Actinobacteria" = "#DAF7A6", 
+                                "Bacteroidetes" = "#55828B", 
+                                "Cyanobacteria" = "#0086ED",
+                                "Deinococcus-Thermus" = "#D10374",
+                                "Euryarchaeota" = "#666666",
+                                "Firmicutes" = "#BC23FF",
+                                "Planctomycetes" = "#0D9F3F",
+                                "Proteobacteria" = "#0AA6D8",
+                                "Spirochaetes" = "#E6AB02",
+                                "Tenericutes" = "#372101",
+                                "Verrucomicrobia" = "#8C1567"))
+ggsave(file = "green_barplot_phylum_intx72_noOutliers.svg", 
+       plot = p.ps.bar.phylum.intx72.r)
+#print(p.ps.bar.phylum.intx72.r)
+#dev.off()
+p.ps.bar.phylum.intx72.r
+```
+
+#### Pre-biopsy
+
+```{r i.ordination-5}
+ord.log.pcoa.bray.intxPRE <- ordinate(ps.intxPRE.log, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+plot_ordination(ps.intxPRE.log, ord.log.pcoa.bray.intxPRE, 
+                type = "samples", 
+                color = "lps", 
+                shape = "diet") + 
+  geom_point(size = 4, alpha = 1) + 
+  scale_shape_manual(values = c(15,19,17,18)) + 
+  scale_color_manual(values = c("#55828b","#94d2bd")) 
+```
+
+Color differently
+
+```{r i.ordination-6}
+ord.log.pcoa.bray.intxPRE <- ordinate(ps.intxPRE.log, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+plot_ordination(ps.intxPRE.log, ord.log.pcoa.bray.intxPRE, 
+                type = "samples", 
+                color = "treatment", 
+                shape = "lps",
+                label = "iguana_ID") + 
+  geom_point(size = 4, alpha = 1) + 
+  scale_shape_manual(values = c(15,19,17,18)) 
+#  scale_color_manual(values = c("#55828b","#94d2bd")) 
+```
+
+
+Check on outlier iguana 29 with G-L at PRE.    
+Qubit reading was too low (per Erin Lewis), so probably whatever 
+amplified was contamination.
+
+```{r i.ordination-6b}
+remove.PRE <- c("29")
+ps.intxPRE.r <- subset_samples(ps.intxPRE, !(iguana_ID %in% remove.PRE))
+ps.intxPRE
+ps.intxPRE.r
+ps.intxPRE.log.r <- subset_samples(ps.intxPRE.log, 
+                                   !(iguana_ID %in% remove.PRE))
+ps.intxPRE.rab.r <- subset_samples(ps.intxPRE.rab, 
+                                   !(iguana_ID %in% remove.PRE))
+```
+
+
+Redo the pCA
+
+```{r i.ordination-6c}
+ord.log.pcoa.bray.intxPRE.r <- ordinate(ps.intxPRE.log.r, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+#svg("PCA_intxPRE.svg")
+p.pca.intxPRE <- plot_ordination(ps.intxPRE.log.r, ord.log.pcoa.bray.intxPRE.r, 
+                type = "samples", 
+                color = "diet") + 
+  geom_point(aes(fill = treatment, shape = lps), 
+             size = 5, alpha = 1) + 
+  scale_shape_manual(values = c(21, 21)) + 
+  scale_color_manual(values = c("navy", "steelblue1")) + 
+  scale_fill_manual(values = c("white","navy", "white" , "steelblue1" )) +
+  theme(axis.text.x = element_text(size=14),
+        axis.text.y = element_text(size = 12),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+        axis.line = element_line())  
+ggsave(file = "PCA_intxPRE.svg", plot = p.pca.intxPRE)
+#print(p.pca.intxPRE)
+#dev.off()
+p.pca.intxPRE
+```
+
+
+
+###### Redo the bar plot with outlier removed
+
+Get top phyla
+
+
+```{r i.bar-10b}
+ps.intxPRE_phylum.r <- ps.intxPRE.r %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  filter(Abundance > 0.02) %>%                         # Filter out low abundance taxa
+  arrange(Phylum)                                      # Sort data frame alphabetically by phylum
+levels(as.factor(ps.intxPRE_phylum.r$Phylum))
+```
+
+There are 9 phyla
+
+```{r i.bar-11b}
+ps.intxPRE_phylum.r$sample_type_order_n[ps.intxPRE_phylum.r$treatment == "G-L"] <- 1
+ps.intxPRE_phylum.r$sample_type_order_n[ps.intxPRE_phylum.r$treatment == "W-L"] <- 2
+ps.intxPRE_phylum.r$sample_type_order_n[ps.intxPRE_phylum.r$treatment == "G-C"] <- 3
+ps.intxPRE_phylum.r$sample_type_order_n[ps.intxPRE_phylum.r$treatment == "W-C"] <- 4
+```
+
+
+Make a reordering variable
+
+```{r i.bar-12b}
+ps.intxPRE_phylum.r$comboID <- paste(ps.intxPRE_phylum.r$sample_type_order_n, 
+                                  ps.intxPRE_phylum.r$Sample, sep = "_")
+```
+
+Plot 
+
+Colors came from 64-color panel here:
+http://godsnotwheregodsnot.blogspot.com/2012/09/color-distribution-methodology.html
+
+```{r i.bar-13b}
+#svg("green_barplot_phylum_intxPRE_noOutlier.svg")
+p.ps.bar.phylum.intxPRE.r <- ggplot(ps.intxPRE_phylum.r, 
+                                    aes(x=reorder(comboID, 
+                                                  -sample_type_order_n), 
+                                         y=Abundance, 
+                                         fill = Phylum)) +
+  geom_bar(stat="identity") + coord_flip() +
+  theme(axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size = 8),
+              panel.background = element_rect(fill = "white"),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),) +
+  ylab("Relative Abundance (Phyla > 2%)") +
+  xlab("Sample") + 
+  ylim(0,1)  + 
+  scale_fill_manual(values = c("Actinobacteria" = "#DAF7A6", 
+                                "Bacteroidetes" = "#55828B", 
+                                "Cyanobacteria" = "#0086ED",
+                                "Deinococcus-Thermus" = "#D10374",
+                                "Euryarchaeota" = "#666666",
+                                "Firmicutes" = "#BC23FF",
+                                "Planctomycetes" = "#0D9F3F",
+                                "Proteobacteria" = "#0AA6D8",
+                                "Spirochaetes" = "#E6AB02",
+                                "Tenericutes" = "#372101",
+                                "Verrucomicrobia" = "#8C1567"))
+ggsave(file = "green_barplot_phylum_intxPRE_noOutlier.svg", 
+       plot = p.ps.bar.phylum.intxPRE.r)
+#print(p.ps.bar.phylum.intxPRE.r)
+#dev.off()
+p.ps.bar.phylum.intxPRE.r
+```
+
+
+#### All time points
+
+###### Make new phyloseq object since outliers have been removed
+
+```{r ordination-7}
+remove.ALL <- c("29", "34", "35")
+ps.intxALL.r <- subset_samples(ps.intxALL, !(iguana_ID %in% remove.ALL))
+ps.intxALL
+ps.intxALL.r
+ps.intxALL.log.r <- subset_samples(ps.intxALL.log, 
+                                   !(iguana_ID %in% remove.ALL))
+ps.intxALL.rab.r <- subset_samples(ps.intxALL.rab, 
+                                   !(iguana_ID %in% remove.ALL))
+```
+
+
+```{r ordination-8}
+ord.log.pcoa.bray.intxALL <- ordinate(ps.intxALL.log.r, 
+                                     method = "PCoA", 
+                                     distance = "bray")
+plot_ordination(ps.intxALL.log.r, ord.log.pcoa.bray.intxALL, 
+                type = "samples", 
+                color = "treat_time", 
+                shape = "treatment") + 
+  geom_point(size = 4, alpha = 1) #+ 
+ # scale_shape_manual(values = c(15,19,17,18)) + 
+ # scale_color_manual(values = c("#55828b","#94d2bd")) 
+```
+
+## Community differences on relative abundance
+
+Following advice from https://github.com/joey711/phyloseq/issues/689.
+I am using distance matrices based on relative abundance as a normalization method, \
+but can repeat with rarefied data. 
+
+
+#### 24 hr
+
+
+Each iguana is represented only once in each time point, 
+so we would want to account for iguana ID if comparing across timepoints 
+But this does not seem necessary within a time point.
+
+
+```{r i.adonis-1}
+bc.ps.t.intx24 <- phyloseq::distance(ps.intx24.rab, method = "bray")
+samples.ps.intx24 <- phyloseq::sample_data(ps.intx24.rab)
+adonis.ps.t.intx24.noStrata <- vegan::adonis2(bc.ps.t.intx24 ~ samples.ps.intx24$treatment, 
+                                permutations = 9999)
+adonis.ps.t.intx24.noStrata
+
+```
+
+
+
+Do pairwise testing
+
+```{r i.adonis-2}
+pw_adonis.ps.t.intx24 <- pairwise.perm.manova(bc.ps.t.intx24, 
+                                            samples.ps.intx24$treatment, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_adonis.ps.t.intx24
+```
+
+Significant differences between lps and control for glucose,
+but not for water diet.
+
+Also sigificant effects of diet in both treatment and lps.
+
+No difference between control on water diet and lps on glucose?
+
+
+#### 72 hr
+
+
+
+```{r i.adonis-3}
+bc.ps.t.intx72.r <- phyloseq::distance(ps.intx72.rab.r, method = "bray")
+samples.ps.intx72.r <- phyloseq::sample_data(ps.intx72.rab.r)
+adonis.ps.t.intx72.r.noStrata <- vegan::adonis2(bc.ps.t.intx72.r ~ samples.ps.intx72.r$treatment, 
+                                permutations = 9999)
+adonis.ps.t.intx72.r.noStrata
+```
+
+
+Do pairwise testing
+
+```{r i.adonis-4}
+pw_adonis.ps.t.intx72.r <- pairwise.perm.manova(bc.ps.t.intx72.r, 
+                                            samples.ps.intx72.r$treatment, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_adonis.ps.t.intx72.r
+```
+
+No significant differences after correction for multiple testing.
+
+#### Pre-biopsy
+
+
+
+```{r i.adonis-5}
+bc.ps.t.intxPRE.r <- phyloseq::distance(ps.intxPRE.rab.r, method = "bray")
+samples.ps.intxPRE.r <- phyloseq::sample_data(ps.intxPRE.rab.r)
+adonis.ps.t.intxPRE.r.noStrata <- vegan::adonis2(bc.ps.t.intxPRE.r ~ samples.ps.intxPRE.r$treatment, 
+                                permutations = 9999)
+adonis.ps.t.intxPRE.r.noStrata
+```
+
+Do pairwise testing
+
+```{r i.adonis-6}
+pw_adonis.ps.t.intxPRE.r <- pairwise.perm.manova(bc.ps.t.intxPRE.r, 
+                                            samples.ps.intxPRE.r$treatment, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_adonis.ps.t.intxPRE.r
+```
+
+No significant differences.
+
+
+#### All
+
+
+```{r adonis-7b}
+bc.ps.t.intxALL.r <- phyloseq::distance(ps.intxALL.rab.r, method = "bray")
+samples.ps.intxALL.r <- phyloseq::sample_data(ps.intxALL.rab.r)
+adonis.ps.t.intxALL.r1 <- vegan::adonis2(bc.ps.t.intxALL.r ~ samples.ps.intxALL.r$diet * 
+                                           samples.ps.intxALL.r$lps * 
+                                           samples.ps.intxALL.r$timepoint, 
+                                permutations = 9999,
+                                strata=samples.ps.intxALL.r$iguana_ID)
+adonis.ps.t.intxALL.r1
+```
+
+
+
+```{r adonis-7a}
+
+adonis.ps.t.intxALL.r2 <- vegan::adonis2(bc.ps.t.intxALL.r ~ samples.ps.intxALL.r$treat_time, 
+                                permutations = 9999,
+                                strata=samples.ps.intxALL.r$iguana_ID)
+adonis.ps.t.intxALL.r2
+```
+
+
+
+Do pairwise testing
+
+```{r adonis-8}
+pw_adonis.ps.t.intxALL.r.treat_time <- pairwise.perm.manova(bc.ps.t.intxALL.r, 
+                                            samples.ps.intxALL.r$treat_time, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_adonis.ps.t.intxALL.r.treat_time
+```
+
+```{r adonis-8b}
+M.treat_time <-  as.matrix(pw_adonis.ps.t.intxALL.r.treat_time$p.value)
+svg("treat_time_matrix.svg")
+p.treat.time.matrix <- corrplot(M.treat_time, 
+         type = "lower", 
+         method = "color", 
+         col = colorRampPalette(c("#0099cd", "#eff0f1"))(300), 
+         tl.col = "black",
+         outline = TRUE, 
+         addCoef.col = "black", 
+         is.corr = FALSE)
+print(p.treat.time.matrix)
+dev.off()
+p.treat.time.matrix
+```
+
+```{r adonis-9}
+pw_tour_adonis.ps.t.intxALL.r.time <- pairwise.perm.manova(bc.ps.t.intxALL.r, 
+                                            samples.ps.intxALL.r$timepoint, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_tour_adonis.ps.t.intxALL.r.time
+```
+
+## Dispersion
+
+It is important to know how much of these significnat differences in overall 
+microbiome composition found with adonis are due to differences in dispersion 
+(i.e., variance) within the sample type.
+
+**Based on relative abundance**
+
+#### 24 hr
+
+```{r i.dispersion-1}
+beta.ps.t.intx24 <- betadisper(bc.ps.t.intx24, 
+                          samples.ps.intx24$treatment, 
+                          bias.adjust = TRUE)
+beta.ps.t.intx24
+beta.ps.t.intx24.an <- anova(beta.ps.t.intx24)
+beta.ps.t.intx24.an
+beta.ps.t.intx24.test <- permutest(beta.ps.t.intx24, 
+                            control = permControl(nperm = 9999),  
+                            pairwise=TRUE)
+beta.ps.t.intx24.test
+beta.ps.t.intx24.HSD <- TukeyHSD(beta.ps.t.intx24)
+beta.ps.t.intx24.HSD
+```
+
+No significant differences in beta diversity.
+
+#### 72 hr
+
+```{r i.dispersion-2}
+beta.ps.t.intx72.r <- betadisper(bc.ps.t.intx72.r, 
+                          samples.ps.intx72.r$treatment, 
+                          bias.adjust = TRUE)
+beta.ps.t.intx72.r
+beta.ps.t.intx72.r.an <- anova(beta.ps.t.intx72.r)
+beta.ps.t.intx72.r.an
+beta.ps.t.intx72.r.test <- permutest(beta.ps.t.intx72.r, 
+                            control = permControl(nperm = 9999),  
+                            pairwise=TRUE)
+beta.ps.t.intx72.r.test
+beta.ps.t.intx72.r.HSD <- TukeyHSD(beta.ps.t.intx72.r)
+beta.ps.t.intx72.r.HSD
+```
+
+No significant differences in beta diversity.
+
+#### Pre-biopsy
+
+```{r i.dispersion-3}
+beta.ps.t.intxPRE.r <- betadisper(bc.ps.t.intxPRE.r, 
+                          samples.ps.intxPRE.r$treatment, 
+                          bias.adjust = TRUE)
+beta.ps.t.intxPRE.r
+beta.ps.t.intxPRE.r.an <- anova(beta.ps.t.intxPRE.r)
+beta.ps.t.intxPRE.r.an
+beta.ps.t.intxPRE.r.test <- permutest(beta.ps.t.intxPRE.r, 
+                            control = permControl(nperm = 9999),  
+                            pairwise=TRUE)
+beta.ps.t.intxPRE.r.test
+beta.ps.t.intxPRE.r.HSD <- TukeyHSD(beta.ps.t.intxPRE.r)
+beta.ps.t.intxPRE.r.HSD
+```
+
+No significant differences in beta diversity.
+
+
+#### ALL
+
+```{r i.dispersion-4}
+beta.ps.t.intxALL.r <- betadisper(bc.ps.t.intxALL.r, 
+                          samples.ps.intxALL.r$treat_time, 
+                          bias.adjust = TRUE)
+beta.ps.t.intxALL.r
+beta.ps.t.intxALL.r.an <- anova(beta.ps.t.intxALL.r)
+beta.ps.t.intxALL.r.an
+beta.ps.t.intxALL.r.test <- permutest(beta.ps.t.intxALL.r, 
+                            control = permControl(nperm = 9999),  
+                            pairwise=TRUE)
+beta.ps.t.intxALL.r.test
+beta.ps.t.intxALL.r.HSD <- TukeyHSD(beta.ps.t.intxALL.r)
+beta.ps.t.intxALL.r.HSD
+```
+
+## Alpha diversity
+
+
+#### Estimate diversity
+
+Using a non-filtered phyloseq object after warning received when using 'ps'. \
+Warning said better to use non-filtered data. It detected this based on few \
+singletons.
+
+###### 24 hr
+
+```{r i.alpha-1}
+samples.ps.decon.intx24 <- phyloseq::sample_data(ps.decon.intx24)
+intx24.ps.shannon <- estimate_richness(ps.decon.intx24,split=TRUE, 
+                                  measures = c("Observed","Shannon"))
+samples.ps.intx24.shannon <- merge(samples.ps.decon.intx24, 
+                              intx24.ps.shannon, 
+                              by=0, all = TRUE)
+```
+
+###### 72 hr
+
+```{r i.alpha-2}
+ps.decon.intx72.r <- subset_samples(ps.decon.intx72, !(iguana_ID %in% remove.72))
+samples.ps.decon.intx72.r <- phyloseq::sample_data(ps.decon.intx72.r)
+intx72.ps.shannon.r <- estimate_richness(ps.decon.intx72.r,split=TRUE, 
+                                  measures = c("Observed","Shannon"))
+samples.ps.intx72.shannon.r <- merge(samples.ps.decon.intx72.r, 
+                              intx72.ps.shannon.r, 
+                              by=0, all = TRUE)
+```
+
+###### Pre-biopsy 
+
+```{r i.alpha-3a}
+ps.decon.intxPRE.r <- subset_samples(ps.decon.intxPRE, !(iguana_ID %in% remove.PRE))
+samples.ps.decon.intxPRE.r <- phyloseq::sample_data(ps.decon.intxPRE.r)
+intxPRE.ps.shannon.r <- estimate_richness(ps.decon.intxPRE.r,split=TRUE, 
+                                  measures = c("Observed","Shannon"))
+samples.ps.intxPRE.shannon.r <- merge(samples.ps.decon.intxPRE.r, 
+                              intxPRE.ps.shannon.r, 
+                              by=0, all = TRUE)
+```
+
+
+###### ALL
+
+```{r i.alpha-3b}
+ps.decon.intxALL.r <- subset_samples(ps.decon.intxALL, !(iguana_ID %in% remove.ALL))
+samples.ps.decon.intxALL.r <- phyloseq::sample_data(ps.decon.intxALL.r)
+intxALL.ps.shannon.r <- estimate_richness(ps.decon.intxALL.r,split=TRUE, 
+                                  measures = c("Observed","Shannon"))
+samples.ps.intxALL.shannon.r <- merge(samples.ps.decon.intxALL.r, 
+                              intxALL.ps.shannon.r, 
+                              by=0, all = TRUE)
+```
+
+
+NOTE: This generates a warning error about singletons. 
+However, this does not apply to the Shannon index. 
+
+From https://github.com/benjjneb/dada2/issues/214 
+
+> DADA2 does not call singletons, due to the difficulty of differentiating rare singleton errors from real singleton variants.
+This means you should not use the output of DADA2 to estimate richness (eg. Chao S1). However, you shouldn't have been doing that with the output of other methods either, as the high levels of FP singletons made richness estimates wrong anyway. Right now, I don't think a method exists that can make valid richness estimates from high-throughput amplicon data due to the difficulty of calling singletons accurately, and the sensitivity of richness estimation to the number of singletons.
+Other measures of diversity that aren't totally reliant on singletons, eg. Shannon/Simpson, are valid to use, and you can ignore the warning in phyloseq when calculating those measures.
+
+#### Shannon Index
+
+##### 24 hr
+
+###### Plot distribution
+
+```{r i.alpha-4}
+histogram(samples.ps.intx24.shannon$Shannon)
+qqp(samples.ps.intx24.shannon$Shannon, "norm")
+ad.test(samples.ps.intx24.shannon$Shannon)
+descdist(samples.ps.intx24.shannon$Shannon, boot = 50)
+# log
+histogram(log(samples.ps.intx24.shannon$Shannon))
+qqp(log(samples.ps.intx24.shannon$Shannon + 0.1), "norm")
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We don't need to account for iguana, because there is only one sample per iguana
+
+```{r i.alpha-5}
+# no transformation
+i24.shannon.glm.1 <- glm(Shannon ~ treatment , 
+                       data = samples.ps.intx24.shannon, 
+                       family = gaussian(link = identity))
+summary(i24.shannon.glm.1)
+Anova(i24.shannon.glm.1)
+AIC(i24.shannon.glm.1)
+```
+
+Use log link function
+
+```{r i.alpha-6}
+# log transformation
+i24.shannon.glm.2 <- glm(Shannon ~ treatment , 
+                       data = samples.ps.intx24.shannon, 
+                       family = gaussian(link = identity))
+summary(i24.shannon.glm.2)
+Anova(i24.shannon.glm.2)
+AIC(i24.shannon.glm.2)
+```
+
+```{r i.alpha-6b}
+emmeans(i24.shannon.glm.1, list(pairwise ~ treatment), adjust = "tukey")
+```
+
+So diet only has marginal effects on diversity in the controls.
+But effects become magnified with immune challenge.
+
+Immune challenge has big effects on diversity.
+
+###### Group medians
+
+```{r i.alpha-7}
+samples.ps.intx24.shannon %>%
+  group_by(treatment) %>% 
+  summarise_at(vars(Shannon), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r i.alpha-8}
+#svg("alpha_Shannon_intx24.svg")
+p.alpha.shannon.intx24 <- ggplot(samples.ps.intx24.shannon, 
+                                 aes(x = treatment, 
+                                    y = Shannon, 
+                                 color = treatment, fill = treatment)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_color_manual(values = c("navy", "black", "steelblue1", "black")) + 
+  scale_fill_manual(values = c("white", "navy", "white", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "alpha_Shannon_intx24.svg", plot = p.alpha.shannon.intx24)
+#print(p.alpha.shannon.intx24)
+#dev.off()
+p.alpha.shannon.intx24
+```
+
+Looks like LPS suppresses diversity - but glucose elevates diversity.
+
+##### 72 hr
+
+###### Plot distribution
+
+```{r i.alpha-9}
+histogram(samples.ps.intx72.shannon.r$Shannon)
+qqp(samples.ps.intx72.shannon.r$Shannon, "norm")
+ad.test(samples.ps.intx72.shannon.r$Shannon)
+descdist(samples.ps.intx72.shannon.r$Shannon, boot = 50)
+# log
+histogram(log(samples.ps.intx72.shannon.r$Shannon))
+qqp(log(samples.ps.intx72.shannon.r$Shannon + 0.1), "norm")
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We don't need to account for iguana, because there is only one sample per iguana
+
+```{r i.alpha-10}
+# no transformation
+i72.shannon.glm.1 <- glm(Shannon ~ treatment , 
+                       data = samples.ps.intx72.shannon.r, 
+                       family = gaussian(link = identity))
+summary(i72.shannon.glm.1)
+Anova(i72.shannon.glm.1)
+AIC(i72.shannon.glm.1)
+```
+
+
+```{r i.alpha-11}
+emmeans(i72.shannon.glm.1, list(pairwise ~ treatment), adjust = "tukey")
+```
+
+Immune challenge has marginal effects on diversity in glucose group,
+but not in water group.
+No differences in diet.
+
+###### Group medians
+
+```{r i.alpha-12}
+samples.ps.intx72.shannon.r %>%
+  group_by(treatment) %>% 
+  summarise_at(vars(Shannon), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r i.alpha-13}
+#svg("alpha_Shannon_intx72.svg")
+p.alpha.shannon.intx72 <- ggplot(samples.ps.intx72.shannon.r, 
+                                 aes(x = treatment, 
+                                    y = Shannon, 
+                                 color = treatment, fill = treatment)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_color_manual(values = c("navy", "black", "steelblue1", "black")) + 
+  scale_fill_manual(values = c("white", "navy", "white", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "alpha_Shannon_intx72.svg", plot = p.alpha.shannon.intx72)
+#print(p.alpha.shannon.intx72)
+#dev.off()
+p.alpha.shannon.intx72
+```
+
+##### Pre-biopsy
+
+###### Plot distribution
+
+```{r i.alpha-14}
+histogram(samples.ps.intxPRE.shannon.r$Shannon)
+qqp(samples.ps.intxPRE.shannon.r$Shannon, "norm")
+ad.test(samples.ps.intxPRE.shannon.r$Shannon)
+descdist(samples.ps.intxPRE.shannon.r$Shannon, boot = 50)
+# log
+histogram(log(samples.ps.intxPRE.shannon.r$Shannon))
+qqp(log(samples.ps.intxPRE.shannon.r$Shannon + 0.1), "norm")
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We don't need to account for iguana, because there is only one sample per iguana
+
+```{r i.alpha-15}
+# no transformation
+iPRE.shannon.glm.1 <- glm(Shannon ~ treatment , 
+                       data = samples.ps.intxPRE.shannon.r, 
+                       family = gaussian(link = identity))
+summary(iPRE.shannon.glm.1)
+Anova(iPRE.shannon.glm.1)
+AIC(iPRE.shannon.glm.1)
+```
+
+No differences in Shannon index. 
+
+###### Group medians
+
+```{r i.alpha-17}
+samples.ps.intxPRE.shannon.r %>%
+  group_by(treatment) %>% 
+  summarise_at(vars(Shannon), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r i.alpha-18}
+#svg("alpha_Shannon_intxPRE.svg")
+p.alpha.shannon.intxPRE <- ggplot(samples.ps.intxPRE.shannon.r, 
+                                 aes(x = treatment, 
+                                    y = Shannon, 
+                                 color = treatment, fill = treatment)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_color_manual(values = c("navy", "black", "steelblue1", "black")) + 
+  scale_fill_manual(values = c("white", "navy", "white", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "alpha_Shannon_intxPRE.svg", plot = p.alpha.shannon.intxPRE)
+#print(p.alpha.shannon.intxPRE)
+#dev.off()
+p.alpha.shannon.intxPRE
+```
+
+##### ALL
+
+###### Plot distribution
+
+```{r alpha-14}
+histogram(samples.ps.intxALL.shannon.r$Shannon)
+qqp(samples.ps.intxALL.shannon.r$Shannon, "norm")
+ad.test(samples.ps.intxALL.shannon.r$Shannon)
+descdist(samples.ps.intxALL.shannon.r$Shannon, boot = 50)
+# log
+histogram(log(samples.ps.intxALL.shannon.r$Shannon+0.1))
+qqp(log(samples.ps.intxALL.shannon.r$Shannon + 0.1), "norm")
+ad.test(log(samples.ps.intxALL.shannon.r$Shannon+0.1))
+descdist(log(samples.ps.intxALL.shannon.r$Shannon+0.1), boot = 50)
+# inverse
+histogram(1/(samples.ps.intxALL.shannon.r$Shannon))
+qqp(1/(samples.ps.intxALL.shannon.r$Shannon+0.1), "norm")
+ad.test(1/(samples.ps.intxALL.shannon.r$Shannon+0.1))
+descdist(1/(samples.ps.intxALL.shannon.r$Shannon+0.1), boot = 50)
+```
+
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+
+```{r alpha-15a}
+# no transformation
+iALL.shannon.lm0 <- lmer(Shannon ~ treat_time + (1 |iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r, 
+                       REML = FALSE)
+summary(iALL.shannon.lm0)
+Anova(iALL.shannon.lm0)
+```
+
+Use box-cox transformation
+
+```{r alpha-15b}
+bc.shannon.all <- boxcox(Shannon + 0.0001 ~  treat_time , 
+                         data = samples.ps.intxALL.shannon.r)
+trans.shannon.all <- bc.shannon.all$x[which.max(bc.shannon.all$y)]
+trans.shannon.all
+```
+
+Added a small constant, because one sample has Shannon = 0.
+
+
+```{r alpha-15c}
+iALL.shannon.lm1 <- lmer(Shannon^trans.shannon.all ~ treat_time + (1|iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r, 
+                       REML = FALSE)
+summary(iALL.shannon.lm1)
+Anova(iALL.shannon.lm1)
+```
+
+
+
+```{r alpha-22a}
+emmeans(iALL.shannon.lm1, list(pairwise ~ treat_time), adjust = "tukey")
+```
+
+###### Group medians
+
+```{r alpha-17}
+samples.ps.intxALL.shannon.r %>%
+  group_by(treat_time) %>% 
+  summarise_at(vars(Shannon), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r alpha-18}
+svg("alpha_Shannon_intxALL.svg")
+p.alpha.shannon.intxALL <- ggplot(samples.ps.intxALL.shannon.r, 
+                                  aes(x = treat_time, 
+                                    y = Shannon, 
+                                 fill = treat_time)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  #scale_fill_manual(values = c("#436436","#d6f599")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+print(p.alpha.shannon.intxALL)
+dev.off()
+p.alpha.shannon.intxALL
+```
+
+How does Shannon index change in each iguana as a function of time and treatment
+
+```{r alpha-19b}
+ggplot(samples.ps.intxALL.shannon.r, 
+                                  aes(x = timepoint, 
+                                    y = Shannon, 
+                                 group = iguana_ID, color = treatment)) + 
+        geom_line() 
+```
+
+```{r alpha-20a}
+
+svg("alpha_Shannon_intxALL-grouped.svg")
+p.alpha.shannon.intxALL.grouped <- ggplot(samples.ps.intxALL.shannon.r, 
+                                  aes(x = treatment, 
+                                    y = Shannon, 
+                                 fill = timepoint)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 14), 
+              axis.text.y = element_text(color="black",size = 14), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_fill_manual(values = c("#0081a7","#00afb9", "#fed9b7")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+print(p.alpha.shannon.intxALL.grouped)
+dev.off()
+p.alpha.shannon.intxALL.grouped
+```
+
+#### Species Richness
+
+##### 24 hr
+
+###### Plot distribution
+
+```{r i.alpha-19}
+histogram(samples.ps.intx24.shannon$Observed)
+qqp(samples.ps.intx24.shannon$Observed, "norm")
+ad.test(samples.ps.intx24.shannon$Observed)
+descdist(samples.ps.intx24.shannon$Observed, boot = 50)
+# log
+histogram(log(samples.ps.intx24.shannon$Observed))
+qqp(log(samples.ps.intx24.shannon$Observed + 0.1), "norm")
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We don't need to account for iguana, because there is only one sample per iguana
+
+```{r i.alpha-20}
+# no transformation
+i24.observed.glm.1 <- glm(Observed ~ treatment , 
+                       data = samples.ps.intx24.shannon, 
+                       family = gaussian(link = identity))
+summary(i24.observed.glm.1)
+Anova(i24.observed.glm.1)
+AIC(i24.observed.glm.1)
+```
+
+
+Use box-cox transformation
+
+```{r i.alpha-21}
+bc.observed.24 <- boxcox(Observed + 0.0001 ~  treatment , 
+                         data = samples.ps.intx24.shannon)
+trans.observed.24 <- bc.observed.24$x[which.max(bc.observed.24$y)]
+trans.observed.24
+```
+
+Added a small constant, because one sample has observed = 0.
+
+
+```{r i.alpha-22}
+i24.observed.glm1 <- glm(Observed^trans.observed.24 ~ treatment , 
+                       data = samples.ps.intx24.shannon, 
+                       family = gaussian(link = identity))
+summary(i24.observed.glm1)
+Anova(i24.observed.glm1)
+```
+
+```{r i.alpha-23b}
+emmeans(i24.observed.glm1, list(pairwise ~ treatment), adjust = "tukey")
+```
+
+
+No effect of diet on species richness.
+Large effect of immune challenge on species richness.
+
+
+###### Group medians
+
+```{r i.alpha-23}
+samples.ps.intx24.shannon %>%
+  group_by(treatment) %>% 
+  summarise_at(vars(Observed), funs(median(., na.rm = TRUE)))
+```
+
+Almost no taxa were detected in LPS water group.
+
+###### Plots
+
+```{r i.alpha-24}
+#svg("alpha_Observed_intx24.svg")
+p.alpha.observed.intx24 <- ggplot(samples.ps.intx24.shannon, 
+                                 aes(x = treatment, 
+                                    y = Observed, 
+                                 color = treatment, fill = treatment)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_color_manual(values = c("navy", "black", "steelblue1", "black")) + 
+  scale_fill_manual(values = c("white", "navy", "white", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "alpha_Observed_intx24.svg", plot = p.alpha.observed.intx24)
+#print(p.alpha.observed.intx24)
+#dev.off()
+p.alpha.observed.intx24
+```
+
+Looks like LPS suppresses diversity - but glucose elevates diversity.
+
+##### 72 hr
+
+###### Plot distribution
+
+```{r i.alpha-25}
+histogram(samples.ps.intx72.shannon.r$Observed)
+qqp(samples.ps.intx72.shannon.r$Observed, "norm")
+ad.test(samples.ps.intx72.shannon.r$Observed)
+descdist(samples.ps.intx72.shannon.r$Observed, boot = 50)
+# log
+histogram(log(samples.ps.intx72.shannon.r$Observed))
+qqp(log(samples.ps.intx72.shannon.r$Observed + 0.1), "norm")
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We don't need to account for iguana, because there is only one sample per iguana
+
+```{r i.alpha-26}
+# no transformation
+i72.observed.glm.1 <- glm(Observed ~ treatment , 
+                       data = samples.ps.intx72.shannon.r, 
+                       family = gaussian(link = identity))
+summary(i72.observed.glm.1)
+Anova(i72.observed.glm.1)
+AIC(i72.observed.glm.1)
+```
+
+Use box-cox transformation
+
+```{r i.alpha-27}
+bc.observed.72 <- boxcox(Observed + 0.0001 ~  treatment , 
+                         data = samples.ps.intx72.shannon.r)
+trans.observed.72 <- bc.observed.72$x[which.max(bc.observed.72$y)]
+trans.observed.72
+```
+
+
+```{r i.alpha-28}
+# no transformation
+i72.observed.glm.1 <- glm(Observed^trans.observed.72 ~ treatment , 
+                       data = samples.ps.intx72.shannon.r, 
+                       family = gaussian(link = identity))
+summary(i72.observed.glm.1)
+Anova(i72.observed.glm.1)
+AIC(i72.observed.glm.1)
+```
+
+```{r i.alpha-29}
+emmeans(i72.observed.glm.1, list(pairwise ~ treatment), adjust = "tukey")
+```
+
+Marginal effects of LPS in glucose group.
+
+###### Group medians
+
+```{r i.alpha-28b}
+samples.ps.intx72.shannon.r %>%
+  group_by(treatment) %>% 
+  summarise_at(vars(Observed), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r i.alpha-29b}
+#svg("alpha_Observed_intx72.svg")
+p.alpha.observed.intx72 <- ggplot(samples.ps.intx72.shannon.r, 
+                                 aes(x = treatment, 
+                                    y = Observed, 
+                                 color = treatment, fill = treatment)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_color_manual(values = c("navy", "black", "steelblue1", "black")) + 
+  scale_fill_manual(values = c("white", "navy", "white", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "alpha_Observed_intx72.svg", plot = p.alpha.observed.intx72)
+#print(p.alpha.observed.intx72)
+#dev.off()
+p.alpha.observed.intx72
+```
+
+##### Pre-biopsy
+
+###### Plot distribution
+
+```{r i.alpha-30}
+histogram(samples.ps.intxPRE.shannon.r$Observed)
+qqp(samples.ps.intxPRE.shannon.r$Observed, "norm")
+ad.test(samples.ps.intxPRE.shannon.r$Observed)
+descdist(samples.ps.intxPRE.shannon.r$Observed, boot = 50)
+# log
+histogram(log(samples.ps.intxPRE.shannon.r$Observed))
+qqp(log(samples.ps.intxPRE.shannon.r$Observed + 0.1), "norm")
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We don't need to account for iguana, because there is only one sample per iguana
+
+```{r i.alpha-31}
+# no transformation
+iPRE.observed.glm.1 <- glm(Observed ~ treatment , 
+                       data = samples.ps.intxPRE.shannon.r, 
+                       family = gaussian(link = identity))
+summary(iPRE.observed.glm.1)
+Anova(iPRE.observed.glm.1)
+AIC(iPRE.observed.glm.1)
+```
+
+No differences in species richness. 
+
+###### Group medians
+
+```{r i.alpha-32}
+samples.ps.intxPRE.shannon.r %>%
+  group_by(treatment) %>% 
+  summarise_at(vars(Observed), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r i.alpha-33}
+#svg("alpha_Observed_intxPRE.svg")
+p.alpha.observed.intxPRE <- ggplot(samples.ps.intxPRE.shannon.r, 
+                                 aes(x = treatment, 
+                                    y = Observed, 
+                                 color = treatment, fill = treatment)) + 
+        geom_boxplot() + 
+        #annotate("text",x=1,y=5,label="p<0.0001") +
+        #annotate("text",x=2,y=5,label="p=0.02") +
+        scale_y_continuous(name = "Shannon Index") +
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_color_manual(values = c("navy", "black", "steelblue1", "black")) + 
+  scale_fill_manual(values = c("white", "navy", "white", "steelblue1")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+ggsave(file = "alpha_Observed_intxPRE.svg", plot = p.alpha.observed.intxPRE)
+#print(p.alpha.observed.intxPRE)
+#dev.off()
+p.alpha.observed.intxPRE
+```
+
+##### ALL
+
+###### Plot distribution
+
+```{r alpha-19}
+histogram(samples.ps.intxALL.shannon.r$Observed)
+qqp(samples.ps.intxALL.shannon.r$Observed, "norm")
+ad.test(samples.ps.intxALL.shannon.r$Observed)
+descdist(samples.ps.intxALL.shannon.r$Observed, boot = 50)
+# log
+histogram(log(samples.ps.intxALL.shannon.r$Observed))
+qqp(log(samples.ps.intxALL.shannon.r$Observed + 0.1), "norm")
+```
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+###### Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+
+```{r alpha-20.b}
+# no transformation
+iALL.observed.lm0 <- lmer(Observed ~ treat_time + (1 |iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r, 
+                       REML = FALSE)
+summary(iALL.observed.lm0)
+Anova(iALL.observed.lm0)
+```
+
+Use box-cox transformation
+
+```{r alpha-21a}
+bc.observed.all <- boxcox(Observed + 0.0001 ~  treat_time , 
+                         data = samples.ps.intxALL.shannon.r)
+trans.observed.all <- bc.observed.all$x[which.max(bc.observed.all$y)]
+trans.observed.all
+```
+
+Added a small constant, because one sample has observed = 0.
+
+
+```{r alpha-22b}
+iALL.observed.lm1 <- lmer(Observed^trans.observed.all ~ treat_time + 
+                            (1|iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r, 
+                       REML = FALSE)
+summary(iALL.observed.lm1)
+Anova(iALL.observed.lm1)
+```
+
+```{r alpha-27}
+emmeans(iALL.observed.lm1, list(pairwise ~ treat_time), adjust = "tukey")
+```
+
+
+###### Group medians
+
+```{r alpha-28}
+samples.ps.intxALL.shannon.r %>%
+  group_by(treat_time) %>% 
+  summarise_at(vars(Observed), funs(median(., na.rm = TRUE)))
+```
+
+###### Plots
+
+```{r alpha-21b}
+
+svg("alpha_Observed_intxALL-grouped.svg")
+p.alpha.observed.intxALL.grouped <- ggplot(samples.ps.intxALL.shannon.r, aes(x = treatment, 
+                                    y = Observed, 
+                                 color = timepoint, 
+                                 fill = timepoint)) + 
+        geom_boxplot(lwd = 1) + 
+        #annotate("text",x=1,y=5,label="") +
+        #annotate("text",x=2,y=5,label="") +
+        scale_y_continuous(name = "Observed ASVs") +
+        #scale_x_discrete(name = "Dose", 
+        #                 labels=c("High", 
+        #                          "Low")) +  
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 14), 
+              axis.text.y = element_text(color="black",size = 14), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+  scale_fill_manual(values = c("#ededed", "#ededed", "#ededed")) + 
+  scale_color_manual(values = c("#0081a7","#00afb9", "#fed9b7")) +
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+
+
+
+print(p.alpha.observed.intxALL.grouped)
+dev.off()
+p.alpha.observed.intxALL.grouped
+```
+
+# Correlations  of bacterial *abundance* with physiology
+
+
+## Get Physiology data
+
+Susannah sent file `Copy of GreenIguanaMasterSpring2021.xls` on 18 May 2022.
+This has two tabs - one is the key for which dates are relevant to the 
+experimental groups. Split these into two files and use both.  
+
+We need two matrices:     
+
+1. otus with samples as rows and genera (or families) as columns, 
+with values as abundance
+
+2. phys variables with samples as rows and phys measures as columns 
+
+
+
+```{r phys-1}
+phys <- read_csv("phys_data.csv")
+phys$iguanaID <- as.character(phys$iguanaID)
+phys$`0603agg` <- as.numeric(phys$`0603agg`)
+#
+phys.key <- read_csv("phys_dates_key.csv")
+phys.key
+```
+
+## Baseline
+
+We want to know if there are any correlations with physiology & the 
+microbiome in green iguanas prior to any sort of experimental treatment. 
+Use all samples at the very first time point (3/24).
+
+#### Subset data
+
+Just get baseline samples
+
+```{r phys-2}
+ps.baseline <- ps %>% 
+  subset_samples(timepoint == "baseline")
+```
+
+#### Agglomerate & log-transform
+
+###### Family 
+
+```{r phys-3}
+#
+ps.baseline.family <- aggregate_taxa(ps.baseline, 'Family')
+ps.baseline.family.otus <- abundances(ps.baseline.family)
+ps.baseline.family.otus.t <- as.data.frame(t(ps.baseline.family.otus))  
+#
+matchIDs <- meta.tsv %>% 
+  dplyr::select(sample_ID, iguana_ID)
+#
+ps.baseline.family.otus.t.adj <- ps.baseline.family.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.baseline.family.mat <- as.matrix(ps.baseline.family.otus.t.adj)
+ps.baseline.family.mat.log <- log10(ps.baseline.family.mat)
+```
+
+
+###### ASV 
+
+```{r phys-4}
+#
+ps.baseline.ASVs.otus <- abundances(ps.baseline)
+ps.baseline.ASVs.otus.t <- as.data.frame(t(ps.baseline.ASVs.otus))  
+#
+ps.baseline.ASVs.otus.t.adj <- ps.baseline.ASVs.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.baseline.ASVs.mat <- as.matrix(ps.baseline.ASVs.otus.t.adj)
+ps.baseline.ASVs.mat.log <- log10(ps.baseline.ASVs.mat)
+```
+
+#### Subset phys variables
+
+```{r phys-5}
+baseline.iguanas <- sample_data(ps.baseline)$iguana_ID
+phys.baseline <- phys %>% 
+  dplyr::select(iguanaID, 
+                `0324glu`, 
+                `0324totri`, 
+                `0324drom`, 
+                `0324agg`, 
+                `0324lys`,) %>% 
+  filter(iguanaID %in% baseline.iguanas) %>% 
+  column_to_rownames(var = "iguanaID")
+phys.baseline.mat <- as.matrix(phys.baseline)
+```
+
+
+#### Correlate
+
+###### Family level
+
+
+```{r phys-6}
+baseline.cors.family <- associate(ps.baseline.family.mat, 
+                                  phys.baseline.mat, 
+                        method = "spearman", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(baseline.cors.family))
+write.csv(baseline.cors.family, file = "baseline_cor_fam.csv", quote = FALSE, row.names = FALSE)
+
+```
+
+###### ASV level
+
+```{r phys-7}
+baseline.cors.ASVs <- associate(ps.baseline.ASVs.mat, 
+                                phys.baseline.mat, 
+                        method = "spearman", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(baseline.cors.ASVs))
+write.csv(baseline.cors.ASVs, file = "baseline_cor_ASV.csv", quote = FALSE, row.names = FALSE)
+```
+
+There are no families or ASVs for which abundance is significantly 
+correlated with physiology at the beginning of the experiment.
+
+
+## Question 1. Effects of diet 
+
+a. Change in blood physiology in response to glucose diet
+
+Use glucose treated samples and calculate a change in blood physiology 
+(i.e., glucose, droms, and total triglycerides) between baseline and 
+pre-LPS (4/23). 
+Then correlate with microbial abundance to find taxa most associated 
+with changes in blood physiology following a glucose treatment.
+
+b. Blood physiology after a month of glucose diet 
+
+Find taxa correlated with blood physiology at pre-LPS time point (4/23)
+in glucose treated samples. 
+
+c. Blood physiology after 3 months of glucose diet
+
+Find taxa correlated with blood physiology at post-biopsy time point (6/28) 
+in glucose treated samples.
+
+
+
+
+#### Subset data
+
+We just want the abundance from the bacteria at the pre-LPS timepoint, 
+because this is what we expect to be correlated with changes.  
+
+I suppose I could see a case for baseline abundance of taxa as a 
+prediction of how much blood physiology changes in response to a 
+glucose diet?   
+
+For now, by using the preLPS time, we are a little more agnostic about 
+the direction of causation, right?
+
+```{r phys-8}
+ps.diet.glucose <- ps.diet %>% 
+  subset_samples(diet_time == "g_pre_LPS1")
+```
+
+#### Agglomerate & log-transform 
+
+###### Family 
+
+```{r phys-9}
+#
+ps.diet.glucose.family <- aggregate_taxa(ps.diet.glucose, 'Family')
+ps.diet.glucose.family.otus <- abundances(ps.diet.glucose.family)
+ps.diet.glucose.family.otus.t <- as.data.frame(t(ps.diet.glucose.family.otus))  
+#
+matchIDs <- meta.tsv %>% 
+  dplyr::select(sample_ID, iguana_ID)
+#
+ps.diet.glucose.family.otus.t.adj <- ps.diet.glucose.family.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.diet.glucose.family.mat <- as.matrix(ps.diet.glucose.family.otus.t.adj)
+ps.diet.glucose.family.mat.log <- log10(ps.diet.glucose.family.mat)
+```
+
+
+###### ASV 
+
+```{r phys-10}
+#
+ps.diet.glucose.ASVs.otus <- abundances(ps.diet.glucose)
+ps.diet.glucose.ASVs.otus.t <- as.data.frame(t(ps.diet.glucose.ASVs.otus))  
+#
+ps.diet.glucose.ASVs.otus.t.adj <- ps.diet.glucose.ASVs.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.diet.glucose.ASVs.mat <- as.matrix(ps.diet.glucose.ASVs.otus.t.adj)
+ps.diet.glucose.ASVs.mat.log <- log10(ps.diet.glucose.ASVs.mat)
+```
+
+#### Make new phys variable then subset
+
+```{r phys-11}
+sugar.iguanas <- sample_data(ps.diet.glucose)$iguana_ID
+phys <- phys %>% 
+  mutate(delta_glucose = `0423glu` - `0324glu`, 
+         delta_tri = `0423totri` - `0324totri`,
+         delta_drom = `0423drom` - `0324drom`)
+phys.diet <- phys %>% 
+  dplyr::select(iguanaID, 
+                `0423glu`, delta_glucose, 
+                `0423totri`, delta_tri, 
+                `0423drom`, delta_drom, 
+                `0628glu`, 
+                `0628totri`, 
+                `0628drom`) %>% 
+  filter(iguanaID %in% sugar.iguanas) %>% 
+  column_to_rownames(var = "iguanaID")
+phys.diet.mat <- as.matrix(phys.diet)
+```
+
+#### Correlate
+
+###### Family level
+
+
+```{r phys-12}
+sugar.cors.family <- associate(ps.diet.glucose.family.mat, 
+                               phys.diet.mat, 
+                        method = "spearman", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(sugar.cors.family))
+write.csv(sugar.cors.family, file = "sugar_cors_family.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+No significant correlations with any particular families!
+
+
+###### ASV level
+
+```{r phys-13}
+sugar.cors.ASVs <- associate(ps.diet.glucose.ASVs.mat, 
+                             phys.diet.mat, 
+                        method = "spearman", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(sugar.cors.ASVs))
+write.csv(sugar.cors.ASVs, file = "sugar_cors_ASV.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+
+No correlations at the ASV level either.
+
+
+## Question 2. Effects of LPS
+
+#### Subset data
+
+Most of the significant changes in physiology happened 24 hr and 
+72 hr after LPS treatment. Pull these samples from the data for 
+correlation analysis. 
+
+Use only LPS-treated samples - both glucose and water.
+
+###### 24 hr
+
+```{r phys-14}
+ps.intx24.lps <- ps.intx24 %>% 
+  subset_samples(lps == "l")
+```
+
+
+###### 72 hr
+
+```{r phys-15}
+ps.intx72.lps <- ps.intx72.r %>% 
+  subset_samples(lps == "l")
+```
+
+#### Agglomerate & log-transform 
+
+###### Family 
+
+**24 hr** 
+
+```{r phys-16}
+#
+ps.intx24.lps.family <- aggregate_taxa(ps.intx24.lps, 'Family')
+ps.intx24.lps.family.otus <- abundances(ps.intx24.lps.family)
+ps.intx24.lps.family.otus.t <- as.data.frame(t(ps.intx24.lps.family.otus))  
+#
+matchIDs <- meta.tsv %>% 
+  dplyr::select(sample_ID, iguana_ID)
+#
+ps.intx24.lps.family.otus.t.adj <- ps.intx24.lps.family.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.intx24.lps.family.mat <- as.matrix(ps.intx24.lps.family.otus.t.adj)
+ps.intx24.lps.family.mat.log <- log10(ps.intx24.lps.family.mat)
+```
+
+**72 hr** 
+
+```{r phys-17}
+#
+ps.intx72.lps.family <- aggregate_taxa(ps.intx72.lps, 'Family')
+ps.intx72.lps.family.otus <- abundances(ps.intx72.lps.family)
+ps.intx72.lps.family.otus.t <- as.data.frame(t(ps.intx72.lps.family.otus))  
+#
+matchIDs <- meta.tsv %>% 
+  dplyr::select(sample_ID, iguana_ID)
+#
+ps.intx72.lps.family.otus.t.adj <- ps.intx72.lps.family.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.intx72.lps.family.mat <- as.matrix(ps.intx72.lps.family.otus.t.adj)
+ps.intx72.lps.family.mat.log <- log10(ps.intx72.lps.family.mat)
+```
+
+
+###### ASV 
+
+**24 hr**
+
+```{r phys-18}
+#
+ps.intx24.lps.ASVs.otus <- abundances(ps.intx24.lps)
+ps.intx24.lps.ASVs.otus.t <- as.data.frame(t(ps.intx24.lps.ASVs.otus))  
+#
+ps.intx24.lps.ASVs.otus.t.adj <- ps.intx24.lps.ASVs.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.intx24.lps.ASVs.mat <- as.matrix(ps.intx24.lps.ASVs.otus.t.adj)
+ps.intx24.lps.ASVs.mat.log <- log10(ps.intx24.lps.ASVs.mat)
+```
+
+
+**72 hr**
+
+```{r phys-19}
+#
+ps.intx72.lps.ASVs.otus <- abundances(ps.intx72.lps)
+ps.intx72.lps.ASVs.otus.t <- as.data.frame(t(ps.intx72.lps.ASVs.otus))  
+#
+ps.intx72.lps.ASVs.otus.t.adj <- ps.intx72.lps.ASVs.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.intx72.lps.ASVs.mat <- as.matrix(ps.intx72.lps.ASVs.otus.t.adj)
+ps.intx72.lps.ASVs.mat.log <- log10(ps.intx72.lps.ASVs.mat)
+```
+
+
+#### Subset phys data
+
+###### 24 hr
+
+Looking only at glucose & total triglycerides, because these showed the 
+most significant effects at 24 hr post-LPS. 
+
+```{r phys-20}
+lps24.iguanas <- sample_data(ps.intx24.lps)$iguana_ID
+phys.24 <- phys %>% 
+  dplyr::select(iguanaID, 
+                `0428glu`,  
+                `0428totri`) %>% 
+  filter(iguanaID %in% lps24.iguanas) %>% 
+  column_to_rownames(var = "iguanaID")
+phys.24.mat <- as.matrix(phys.24)
+```
+
+
+###### 72 hr
+
+Looking at glucose, total triglycerides, droms, lysis, and agglutination, 
+because these showed the most significant effects at 72 hr post-LPS. 
+
+```{r phys-21}
+lps72.iguanas <- sample_data(ps.intx72.lps)$iguana_ID
+phys.72 <- phys %>% 
+  dplyr::select(iguanaID, 
+                `0430glu`,  
+                `0430totri`, 
+                `0430drom`, 
+                `0430lys`, 
+                `0430agg`) %>% 
+  filter(iguanaID %in% lps72.iguanas) %>% 
+  column_to_rownames(var = "iguanaID")
+phys.72.mat <- as.matrix(phys.72)
+```
+
+
+#### Correlate
+
+###### Family level
+
+**24 hr**
+
+
+```{r phys-22}
+lps24.cors.family <- associate(ps.intx24.lps.family.mat, 
+                               phys.24.mat, 
+                        method = "pearson", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(lps24.cors.family))
+write.csv(lps24.cors.family, file = "lps24_cors_family.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+
+**72 hr**
+
+
+```{r phys-23}
+lps72.cors.family <- associate(ps.intx72.lps.family.mat, 
+                               phys.72.mat, 
+                        method = "pearson", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(lps72.cors.family))
+write.csv(lps72.cors.family, file = "lps72_cors_family.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+###### ASV level
+
+**24hr**
+
+```{r phys-24}
+lps24.cors.ASVs <- associate(ps.intx24.lps.ASVs.mat, 
+                             phys.24.mat, 
+                        method = "pearson", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(lps24.cors.ASVs))
+write.csv(lps24.cors.ASVs, file = "lps24_cors_ASVs.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+**72hr**
+
+```{r phys-25}
+lps72.cors.ASVs <- associate(ps.intx72.lps.ASVs.mat, 
+                             phys.72.mat, 
+                        method = "pearson", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(lps72.cors.ASVs))
+write.csv(lps72.cors.ASVs, file = "lps72_cors_ASVs.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+
+#### Plot
+
+There were only a few marginally significant correlations.
+
+LPS at 24 hrs with:
+
+X1	X2	Correlation	p.adj
+11	Dermacoccaceae	0428glu	0.8236972	0.0501417
+65	Paracaedibacteraceae	0428glu	0.8236972	0.0501417
+68	Rhodobacteraceae	0428glu	0.8464751	0.0501417
+
+###### Merge data
+
+Get abundance data for families of interest                               
+          
+```{r phys-26}
+ps.intx24.lps.family.mat.r <- ps.intx24.lps.family.mat %>% 
+  as_tibble() %>% 
+  rowid_to_column(var = "iguanaID") %>% 
+  dplyr::select(iguanaID, Dermacoccaceae,Paracaedibacteraceae, Rhodobacteraceae) 
+```
+
+
+Get physiology data of interest
+
+```{r phys-27}
+phys.24.mat.r <- phys.24.mat %>% 
+  as_tibble() %>% 
+  rowid_to_column(var = "iguanaID") %>% 
+  dplyr::select(iguanaID, `0428glu`) 
+```
+
+Merge
+
+```{r phys-28}
+phys.24.lps.sigFams <- ps.intx24.lps.family.mat.r %>% 
+  as_tibble() %>% 
+  left_join(phys.24.mat.r, by = "iguanaID")
+```
+
+
+###### Dermacoccaceae
+
+
+```{r phys-29}
+svg("Dermacoccaceae_24glu.svg")
+p.dermacoccaceae_24glu <- ggplot(phys.24.lps.sigFams, 
+                                   aes(x = `0428glu`, 
+                                    y = Dermacoccaceae)) + 
+        geom_point() + 
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+print(p.dermacoccaceae_24glu)
+dev.off()
+p.dermacoccaceae_24glu
+```
+
+This relationship is being driven by one outlier.
+
+###### Paracaedibacteraceae
+
+
+```{r phys-30}
+svg("paracaedibacteraceae_24glu.svg")
+p.paracaedibacteraceae_24glu <- ggplot(phys.24.lps.sigFams, 
+                                   aes(x = `0428glu`, 
+                                    y = Paracaedibacteraceae)) + 
+        geom_point() + 
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+print(p.paracaedibacteraceae_24glu)
+dev.off()
+p.paracaedibacteraceae_24glu
+```
+
+This relationship is also driven by one outlier. 
+
+
+###### Rhodobacteraceae
+
+
+```{r phys-31}
+svg("rhodobacteraceae_24glu.svg")
+p.rhodobacteraceae_24glu <- ggplot(phys.24.lps.sigFams, 
+                                   aes(x = `0428glu`, 
+                                    y = Rhodobacteraceae)) + 
+        geom_point() + 
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+print(p.rhodobacteraceae_24glu)
+dev.off()
+p.rhodobacteraceae_24glu
+```
+
+This group has slightly more variation, but still seems driven by 1 outlier.
+
+
+# Correlations  of bacterial *diversity* with physiology
+
+From Claudia 3/8/23:
+
+Need to look for correlations between BKA/agglutination with 
+Shannon and Species richness.
+
+BKA:
+24hour (5/28 ) and 72hour (5/30) post LPS2
+
+Agglutination:
+24hour (4/28) and 72 hour (4/30) post LPS1
+24hour (5/28 ) and 72hour (5/30) post LPS2
+
+#### Check for microbiome samples at these times
+
+```{r div-phys-0}
+table(as.factor(sample_data(ps)$timepoint))
+```
+
+We only have 2 microbiome samples from 24 hr post LPS2
+
+There are no microbiome samples 72 hr post LPS2
+
+
+#### Agglutination 24h post LPS1
+
+###### Merge data
+
+```{r div-phys-1}
+lps24.iguanas <- sample_data(ps.intx24.lps)$iguana_ID
+phys.24.agg.diversity <- phys %>% 
+  dplyr::select(iguanaID, 
+                `0428agg`) %>% 
+  filter(iguanaID %in% lps24.iguanas) %>% 
+  dplyr::rename(iguana_ID = iguanaID) %>% 
+  left_join(samples.ps.intx24.shannon, by = "iguana_ID")
+```
+
+###### Correlation test
+
+```{r div-phys-2}
+cor.test(phys.24.agg.diversity$Shannon, phys.24.agg.diversity$`0428agg`, method = "spearman")
+cor.test(phys.24.agg.diversity$Observed, phys.24.agg.diversity$`0428agg`, method = "spearman")
+```
+
+###### plot
+
+**Shannon**
+
+```{r div-phys-3}
+ggplot(phys.24.agg.diversity, aes(x = `0428agg`, 
+                                    y = Shannon)) + 
+        geom_point() + 
+        geom_smooth(method = "lm") + 
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+```
+
+**Species Richness**
+
+```{r div-phys-4}
+ggplot(phys.24.agg.diversity, aes(x = `0428agg`, 
+                                    y = Observed)) + 
+        geom_point() + 
+        geom_smooth(method = "lm") + 
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+```
+
+#### Agglutination 72h post LPS1
+
+###### Merge data
+
+```{r div-phys-5}
+phys.72.agg.diversity <- phys.72 %>% 
+  rowid_to_column(var = "iguana_ID") %>% 
+  mutate_at(vars(iguana_ID), factor) %>% 
+  dplyr::select(iguana_ID, `0430agg`) %>% 
+  left_join(samples.ps.intx72.shannon.r, by = "iguana_ID")
+```
+
+
+###### Correlation test
+
+```{r div-phys-6}
+cor.test(phys.72.agg.diversity$Shannon, phys.72.agg.diversity$`0430agg`, method = "spearman")
+cor.test(phys.72.agg.diversity$Observed, phys.72.agg.diversity$`0430agg`, method = "spearman")
+```
+
+###### Plot
+
+**Shannon**
+
+```{r div-phys-7}
+ggplot(phys.72.agg.diversity, aes(x = `0430agg`, 
+                                    y = Shannon)) + 
+        geom_point() + 
+        geom_smooth(method = "lm") + 
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+```
+
+**Species Richness**
+
+```{r div-phys-8}
+ggplot(phys.72.agg.diversity, aes(x = `0430agg`, 
+                                    y = Observed)) + 
+        geom_point() + 
+        geom_smooth(method = "lm") + 
+        theme(text = element_text(color="black",size = 14), 
+              axis.title = element_text(color="black"), 
+              axis.text.x = element_text(color="black",size = 10), 
+              axis.text.y = element_text(color="black",size = 12), 
+              legend.background = element_blank(),
+              legend.title = element_blank(),
+              panel.background = element_rect(fill = "white"),
+              panel.border = element_blank(),
+              panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank(),
+              axis.line = element_line(size = 0.5, 
+                                       linetype = "solid", 
+                                       colour = "black")) + 
+    theme(strip.background = element_rect(color = "#acacac",
+                                          fill = "#acacac"),
+          strip.text = element_text(size = 14,
+                                    face = "bold"))
+```
+
+# Rarefied data
+
+
+Repeat analyses with rarefied data. 
+
+## Rarefy the separate datasets
+
+
+#### Diet
+
+```{r rare-1}
+ps.diet.rare <- rarefy_even_depth(ps.diet, rngseed = 123)
+ps.diet.rab.rare <- transform_sample_counts(ps.diet.rare, function(x) x/sum(x))
+ps.diet.log.rare <- transform_sample_counts(ps.diet.rare, function(x) log(1 + x))
+min(sample_sums(ps.diet.rare))
+max(sample_sums(ps.diet.rare))
+# also make a non-filtered rarefied set for alpha diversity
+min(sample_sums(ps.diet))
+ps.decon.diet.rare <- rarefy_even_depth(ps.decon.diet, rngseed = 123, 
+                                   sample.size = 6436)
+ps.decon.diet.rare
+```
+
+#### LPSxDiet
+
+```{r rare-2}
+ps.intxALL.r.rare <- rarefy_even_depth(ps.intxALL.r, rngseed = 123)
+ps.intxALL.r.rab.rare <- transform_sample_counts(ps.intxALL.r.rare, function(x) x/sum(x))
+ps.intxALL.r.log.rare <- transform_sample_counts(ps.intxALL.r.rare, function(x) log(1 + x))
+min(sample_sums(ps.intxALL.r.rare))
+max(sample_sums(ps.intxALL.r.rare))
+# also make a non-filtered rarefied set for alpha diversity
+min(sample_sums(ps.intxALL.r))
+ps.decon.intxALL.r.rare <- rarefy_even_depth(ps.decon.intxALL.r, rngseed = 123, 
+                                   sample.size = 5969)
+```
+
+## Commmunity differences
+
+#### Diet
+
+```{r rare-3}
+bc.ps.t.diet.rare <- phyloseq::distance(ps.diet.rab.rare, method = "bray")
+samples.ps.diet.rare <- phyloseq::sample_data(ps.diet.rab.rare)
+adonis.ps.t.diet.rare <- vegan::adonis2(bc.ps.t.diet.rare ~ 
+                                          samples.ps.diet.rare$diet * 
+                                          samples.ps.diet.rare$timepoint, 
+                                permutations = 9999,
+                                strata=samples.ps.diet.rare$iguana_ID)
+adonis.ps.t.diet.rare
+```
+
+Highly significant differences.
+
+Do pairwise testing
+
+```{r rare-4}
+pw_adonis.ps.t.diet.rare <- pairwise.perm.manova(bc.ps.t.diet.rare, 
+                                            samples.ps.diet.rare$diet_time, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_adonis.ps.t.diet.rare
+```
+
+#### LPSxDiet
+
+
+```{r rare-5}
+bc.ps.t.intxALL.r.rare <- phyloseq::distance(ps.intxALL.r.rab.rare, method = "bray")
+samples.ps.intxALL.r.rare <- phyloseq::sample_data(ps.intxALL.r.rab.rare)
+adonis.ps.t.intxALL.r1.rare <- vegan::adonis2(bc.ps.t.intxALL.r.rare ~ samples.ps.intxALL.r.rare$diet * 
+                                           samples.ps.intxALL.r.rare$lps * 
+                                           samples.ps.intxALL.r.rare$timepoint, 
+                                permutations = 9999,
+                                strata=samples.ps.intxALL.r.rare$iguana_ID)
+adonis.ps.t.intxALL.r1.rare
+```
+
+```{r rare-6}
+pw_adonis.ps.t.intxALL.r.treat_time.rare <- pairwise.perm.manova(bc.ps.t.intxALL.r.rare, 
+                                            samples.ps.intxALL.r.rare$treat_time, 
+                                            p.method = "BH", 
+                                            nperm = 9999)
+pw_adonis.ps.t.intxALL.r.treat_time.rare
+```
+
+## Alpha diversity
+
+
+#### Diet
+
+```{r rare-7}
+samples.ps.decon.diet.rare <- phyloseq::sample_data(ps.decon.diet.rare)
+diet.ps.shannon.rare <- estimate_richness(ps.decon.diet.rare,split=TRUE, 
+                                  measures = c("Observed","Shannon"))
+samples.ps.diet.shannon.rare <- merge(samples.ps.decon.diet.rare, 
+                              diet.ps.shannon.rare, 
+                              by=0, all = TRUE)
+```
+
+
+
+###### Shannon Plot distribution
+
+```{r rare-8}
+histogram(samples.ps.diet.shannon.rare$Shannon)
+qqp(samples.ps.diet.shannon.rare$Shannon, "norm")
+ad.test(samples.ps.diet.shannon.rare$Shannon)
+descdist(samples.ps.diet.shannon.rare$Shannon, boot = 50)
+# log
+histogram(log(samples.ps.diet.shannon.rare$Shannon))
+qqp(log(samples.ps.diet.shannon.rare$Shannon), "norm")
+
+```
+
+
+###### Shannon Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We need to include iguana ID as a random effect, because each iguana was sampled twice.
+
+
+```{r rare-9a}
+# no transformation
+d.shannon.rare.m0 <- lmer(Shannon ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon.rare,
+                       REML = FALSE)
+summary(d.shannon.rare.m0)
+Anova(d.shannon.rare.m0)
+```
+
+Use box-cox transformation
+
+```{r rare-9b}
+bc.shannon.rare.d <- boxcox(Shannon ~  diet_time , 
+                         data = samples.ps.diet.shannon.rare)
+trans.shannon.rare.d <- bc.shannon.rare.d$x[which.max(bc.shannon.rare.d$y)]
+trans.shannon.rare.d
+```
+
+
+```{r rare-9d}
+d.shannon.rare.m1 <- lmer(Shannon^trans.shannon.rare.d ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon.rare, 
+                       REML = FALSE)
+summary(d.shannon.rare.m1)
+Anova(d.shannon.rare.m1)
+#emmeans(d.shannon.rare.m1, list(pairwise ~ diet_time), adjust = "tukey")
+```
+
+###### Observed Plot distribution
+
+```{r rare-10}
+histogram(samples.ps.diet.shannon.rare$Observed)
+qqp(samples.ps.diet.shannon.rare$Observed, "norm")
+ad.test(samples.ps.diet.shannon.rare$Observed)
+descdist(samples.ps.diet.shannon.rare$Observed, boot = 50)
+# log
+histogram(log(samples.ps.diet.shannon.rare$Observed))
+qqp(log(samples.ps.diet.shannon.rare$Observed), "norm")
+
+```
+
+###### Observed Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+
+
+
+```{r rare-11a}
+# no transformation
+d.obs.rare.m0 <- lmer(Observed ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon.rare,
+                       REML = FALSE)
+summary(d.obs.rare.m0)
+Anova(d.obs.rare.m0)
+```
+
+Use box-cox transformation
+
+```{r rare-11b}
+bc.obs.rare.d <- boxcox(Observed ~  diet_time , 
+                         data = samples.ps.diet.shannon.rare)
+trans.obs.rare.d <- bc.obs.rare.d$x[which.max(bc.obs.rare.d$y)]
+trans.obs.rare.d
+```
+
+
+```{r rare-9c}
+d.obs.rare.m1 <- lmer(Observed^trans.obs.rare.d ~ diet_time + (1|iguana_ID), 
+                       data = samples.ps.diet.shannon.rare, 
+                       REML = FALSE)
+summary(d.obs.rare.m1)
+Anova(d.obs.rare.m1)
+#emmeans(d.obs.rare.m1, list(pairwise ~ diet_time), adjust = "tukey")
+```
+
+#### LPSxDiet
+
+```{r rare-12}
+samples.ps.decon.intxALL.r.rare <- phyloseq::sample_data(ps.decon.intxALL.r.rare)
+intxALL.ps.shannon.r.rare <- estimate_richness(ps.decon.intxALL.r.rare,split=TRUE, 
+                                  measures = c("Observed","Shannon"))
+samples.ps.intxALL.shannon.r.rare <- merge(samples.ps.decon.intxALL.r.rare, 
+                              intxALL.ps.shannon.r.rare, 
+                              by=0, all = TRUE)
+```
+
+###### Shannon Plot distribution
+
+```{r rare-13}
+histogram(samples.ps.intxALL.shannon.r.rare$Shannon)
+qqp(samples.ps.intxALL.shannon.r.rare$Shannon, "norm")
+ad.test(samples.ps.intxALL.shannon.r.rare$Shannon)
+descdist(samples.ps.intxALL.shannon.r.rare$Shannon, boot = 50)
+# log
+histogram(log(samples.ps.intxALL.shannon.r.rare$Shannon+0.1))
+qqp(log(samples.ps.intxALL.shannon.r.rare$Shannon + 0.1), "norm")
+ad.test(log(samples.ps.intxALL.shannon.r.rare$Shannon+0.1))
+descdist(log(samples.ps.intxALL.shannon.r.rare$Shannon+0.1), boot = 50)
+# inverse
+histogram(1/(samples.ps.intxALL.shannon.r.rare$Shannon))
+qqp(1/(samples.ps.intxALL.shannon.r.rare$Shannon+0.1), "norm")
+ad.test(1/(samples.ps.intxALL.shannon.r.rare$Shannon+0.1))
+descdist(1/(samples.ps.intxALL.shannon.r.rare$Shannon+0.1), boot = 50)
+```
+
+
+###### Shannon Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+We don't need to account for iguana, because there is only one sample per iguana
+
+
+
+```{r rare-14a}
+# no transformation
+iALL.shannon.rare.m0 <- lmer(Shannon ~ treat_time + (1|iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r.rare,
+                       REML = FALSE)
+summary(iALL.shannon.rare.m0)
+Anova(iALL.shannon.rare.m0)
+```
+
+Use box-cox transformation
+
+```{r rare-14b}
+bc.shannon.rare.all <- boxcox(Shannon ~  treat_time , 
+                         data = samples.ps.intxALL.shannon.r.rare)
+trans.shannon.rare.all <- bc.shannon.rare.all$x[which.max(bc.shannon.rare.all$y)]
+trans.shannon.rare.all
+```
+
+
+```{r rare-14c}
+iALL.shannon.rare.m1 <- lmer(Shannon^trans.shannon.rare.all ~ treat_time + 
+                               (1|iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r.rare, 
+                       REML = FALSE)
+summary(iALL.shannon.rare.m1)
+Anova(iALL.shannon.rare.m1)
+#emmeans(iALL.shannon.rare.m1, list(pairwise ~ treat_time), adjust = "tukey")
+```
+
+###### Observed Plot distribution
+
+```{r rare-15}
+histogram(samples.ps.intxALL.shannon.r.rare$Observed)
+qqp(samples.ps.intxALL.shannon.r.rare$Observed, "norm")
+ad.test(samples.ps.intxALL.shannon.r.rare$Observed)
+descdist(samples.ps.intxALL.shannon.r.rare$Observed, boot = 50)
+# log
+histogram(log(samples.ps.intxALL.shannon.r.rare$Observed))
+qqp(log(samples.ps.intxALL.shannon.r.rare$Observed), "norm")
+
+```
+
+###### Observed Test for significant differences
+
+From https://www.juliapilowsky.com/2018/10/19/a-practical-guide-to-mixed-models-in-r/
+
+
+
+
+```{r rare-16a}
+# no transformation
+iALL.observed.rare.m0 <- lmer(Observed ~ treat_time + (1|iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r.rare,
+                       REML = FALSE)
+summary(iALL.observed.rare.m0)
+Anova(iALL.observed.rare.m0)
+```
+
+Use box-cox transformation
+
+```{r rare-16b}
+bc.observed.rare.all <- boxcox(Observed ~  treat_time , 
+                         data = samples.ps.intxALL.shannon.r.rare)
+trans.observed.rare.all <- bc.observed.rare.all$x[which.max(bc.observed.rare.all$y)]
+trans.observed.rare.all
+```
+
+
+```{r rare-16c}
+iALL.observed.rare.m1 <- lmer(Observed^trans.observed.rare.all ~ treat_time + 
+                               (1|iguana_ID), 
+                       data = samples.ps.intxALL.shannon.r.rare, 
+                       REML = FALSE)
+summary(iALL.observed.rare.m1)
+Anova(iALL.observed.rare.m1)
+#emmeans(iALL.observed.rare.m1, list(pairwise ~ treat_time), adjust = "tukey")
+```
+
+# Differential Abundance
+
+# Add phys data to the sample data
+
+Following: https://github.com/joey711/phyloseq/issues/1106 
+
+The problem is that the phys data is by iguana ID, instead of sample ID. 
+Need to match up the phys with the sample...
+
+```{r dab-1}
+phys <- phys %>%
+  dplyr::rename(iguana_ID = iguanaID)
+sample.names.ps <- sample_names(ps)
+sample.iguana <- meta.tsv %>%
+  dplyr::select(c('sample_ID', 'iguana_ID')) %>%
+  filter(sample_ID %in% sample.names.ps)
+phys.samples <- sample.iguana %>%
+  left_join(phys, by = "iguana_ID") %>%
+  column_to_rownames(var = "sample_ID")
+```
+
+
+```{r dab-2}
+phys.data <- sample_data(phys.samples)
+head(phys.data)
+ps.phys <- merge_phyloseq(ps, phys.data)
+head(sample_data(ps.phys))
+```
+## Baseline and Diet
+
+#### Subset and prep data
+
+```{r dab-3}
+ps.phys.baseline <- ps.phys %>%
+  subset_samples(timepoint == "baseline")
+```
+
+#### Agglomerate by family 
+
+```{r dab-4}
+ps.phys.baseline.family <- tax_glom(ps.phys.baseline, 'Family')
+```
+
+
+## LPS x Diet at 24 h
+
+#### Subset and prep data
+
+```{r dab-5}
+ps.phys.intx24 <- ps.phys %>% 
+  subset_samples(timepoint == "24hr_post_LPS1")
+```
+
+#### Agglomerate by family 
+
+```{r dab-6}
+ps.phys.intx24.family <- tax_glom(ps.phys.intx24, 'Family')
+```
+
+#### DESeq2 - stats
+
+
+```{r dab-7}
+de.24h <- phyloseq_to_deseq2(ps.phys.intx24, ~ diet + lps)
+geomean <- function(x,na.rm=TRUE){
+  exp(sum(log(x[x > 0]),na.rm=na.rm) / length(x))
+}
+de.24h.geomeans <- apply(counts(de.24h),1,geomean)
+de.24h <- estimateSizeFactors(de.24h,geoMeans = de.24h.geomeans)
+de.24h <- DESeq(de.24h, fitType = "local")
+alpha = 0.05
+```
+
+Parse pairwise results The following code does fdr correction on a \
+gene-by-gene basis, which will have less power than using the \
+hierarchical method
+
+
+###### DEGs - Diet 
+
+
+
+```{r dab-8a}
+resultsNames(de.24h)
+diffab.24h.diet <- results(de.24h, contrast = c('diet', 'g', 'w'))
+diffab.24h.diet <- diffab.24h.diet[order(diffab.24h.diet$padj, na.last = NA),]
+diffab.24h.diet.p05 <- diffab.24h.diet[(diffab.24h.diet$padj < 
+                                        alpha & !is.na(diffab.24h.diet$padj)),]
+diffab.24h.diet.p05 <- cbind(as(diffab.24h.diet.p05, "data.frame"), 
+                           as(tax_table(ps.phys.intx24)[rownames(diffab.24h.diet.p05), ], 
+                              "matrix"))
+dim(diffab.24h.diet.p05)
+table(diffab.24h.diet.p05$Family, diffab.24h.diet.p05$Phylum)
+write.csv(diffab.24h.diet.p05, file = "diffab_24h_diet_p05.csv", quote = FALSE, 
+          row.names = TRUE)
+```
+
+###### DEGs - Immune Challenge 
+
+
+
+```{r dab-8b}
+resultsNames(de.24h)
+diffab.24h.IC <- results(de.24h, contrast = c('lps', 'l', 'c'))
+diffab.24h.IC <- diffab.24h.IC[order(diffab.24h.IC$padj, na.last = NA),]
+diffab.24h.IC.p05 <- diffab.24h.IC[(diffab.24h.IC$padj < 
+                                        alpha & !is.na(diffab.24h.IC$padj)),]
+diffab.24h.IC.p05 <- cbind(as(diffab.24h.IC.p05, "data.frame"), 
+                           as(tax_table(ps.phys.intx24)[rownames(diffab.24h.IC.p05), ], 
+                              "matrix"))
+dim(diffab.24h.IC.p05)
+table(diffab.24h.IC.p05$Family, diffab.24h.IC.p05$Phylum)
+write.csv(diffab.24h.IC.p05, file = "diffab_24h_IC_p05.csv", quote = FALSE, 
+          row.names = TRUE)
+```
+
+# Correlate DEGs with select physiology
+
+## Filter ASVs 
+
+**24 hr**
+
+Originally we had run the correlations with only the samples that received 
+the LPS treatment. Does this really make sense? Using all samples at 24 h here.
+
+```{r dab-9}
+keepTaxa <- rownames(diffab.24h.IC.p05)
+length(keepTaxa)
+# ASVs
+ps.phys.intx24.filtered <- prune_taxa(keepTaxa, ps.phys.intx24)
+ps.phys.intx24.filtered
+# family
+ps.phys.intx24.family.filtered <- prune_taxa(keepTaxa, ps.phys.intx24.family)
+ps.phys.intx24.family.filtered
+```
+
+
+
+
+
+###### Prep ASVs
+
+```{r dab-10a}
+#
+ps.phys.intx24.filtered.otus <- abundances(ps.phys.intx24.filtered)
+ps.phys.intx24.filtered.otus.t <- as.data.frame(t(ps.phys.intx24.filtered.otus))  
+#
+ps.phys.intx24.filtered.otus.t.adj <- ps.phys.intx24.filtered.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.phys.intx24.ASVs.mat <- as.matrix(ps.phys.intx24.filtered.otus.t.adj)
+ps.phys.intx24.ASVs.mat.log <- log10(ps.phys.intx24.ASVs.mat + 0.01)
+dim(ps.phys.intx24.ASVs.mat.log)
+```
+
+
+###### Prep Families
+
+```{r dab-10b}
+#
+ps.phys.intx24.family.filtered.otus <- abundances(ps.phys.intx24.family.filtered)
+ps.phys.intx24.family.filtered.otus.t <-   as.data.frame(t(ps.phys.intx24.family.filtered.otus))  
+#
+ps.phys.intx24.family.filtered.otus.t.adj <- ps.phys.intx24.family.filtered.otus.t %>% 
+  rownames_to_column(var = "sample_ID")  %>% 
+  left_join(matchIDs, by = c("sample_ID")) %>% 
+  dplyr::select(!"sample_ID") %>% 
+  column_to_rownames(var = "iguana_ID")
+ps.phys.intx24.fam.mat <- as.matrix(ps.phys.intx24.family.filtered.otus.t.adj)
+ps.phys.intx24.fam.mat.log <- log10(ps.phys.intx24.family.filtered.otus.t.adj + 0.01)
+dim(ps.phys.intx24.fam.mat.log)
+```
+
+#### Subset phys data
+
+###### 24 hr
+
+Looking only at glucose & total triglycerides, because these showed the 
+most significant effects at 24 hr post-LPS. 
+
+```{r dab-11}
+lps24.iguanas.2 <- sample_data(ps.phys.intx24.filtered)$iguana_ID
+phys.24.2 <- phys %>% 
+  dplyr::select(iguana_ID, 
+                `0428agg`,  
+                `0428lys`, 
+                `0428bka`) %>% 
+  filter(iguana_ID %in% lps24.iguanas.2) %>% 
+  column_to_rownames(var = "iguana_ID")
+phys.24.mat.2 <- as.matrix(phys.24.2)
+dim(phys.24.mat.2)
+
+```
+
+#### Correlate
+
+###### ASVs
+
+```{r dab-12}
+lps24.cors.ASVs.2 <- associate(ps.phys.intx24.ASVs.mat.log, 
+                             phys.24.mat.2, 
+                        method = "pearson", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+head(knitr::kable(lps24.cors.ASVs.2))
+write.csv(lps24.cors.ASVs.2, file = "lps24_cors_ASVs_part2.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+
+
+###### Family
+
+```{r dab-13}
+lps24.cors.Fam.2 <- associate(ps.phys.intx24.fam.mat.log, 
+                             phys.24.mat.2, 
+                        method = "pearson", 
+                        mode = "table", 
+                        p.adj.threshold = 0.05, 
+                        n.signif = 0, 
+                        p.adj.method = "BH")
+dim(lps24.cors.Fam.2)
+head(knitr::kable(lps24.cors.Fam.2))
+write.csv(lps24.cors.Fam.2, file = "lps24_cors_Families_Part2.csv", 
+          quote = FALSE, 
+          row.names = FALSE)
+```
+# bookkeeping
+
+```{r book-1}
+session_info()
+```

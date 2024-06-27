@@ -1,0 +1,14 @@
+phys_date,key,relevant
+0324,baseline,y
+0423,"glucose, pre LPS",y
+0428,24hr post LPS,y
+0430,72hr post LPS,y
+0504,1 week post LPS,n
+0511,2 week post LPS,n
+0525,"4 week post LPS, preLPS2",n
+0528,24 hr post LPS,n
+0530,72hr post LPS,n
+0603,1 week post LPS,n
+0610,2 week post LPS,n
+0624,"4 week post LPS, pre biopsy",y
+0628,post biopsy,n

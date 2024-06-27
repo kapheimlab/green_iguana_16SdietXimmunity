@@ -1,0 +1,210 @@
+sample_ID	iguana_ID	timepoint	sex	treatment	diet	lps	mass	blank
+BG1								Y
+BG10								Y
+BG11								Y
+BG12								Y
+BG13								Y
+BG14								Y
+BG15								Y
+BG16								Y
+BG17								Y
+BG18								Y
+BG19								Y
+BG2								Y
+BG20								Y
+BG21								Y
+BG22								Y
+BG23								Y
+BG24								Y
+BG25								Y
+BG26								Y
+BG3								Y
+BG4								Y
+BG5								Y
+BG6								Y
+BG7								Y
+BG8								Y
+BG9								Y
+GI103	23	pre_biopsy	M	G-C	g	c	86	N
+GI104	6	pre_biopsy	M	W-C	w	c	61	N
+GI105	30	72hr_post_LPS1	M	W-C	w	c	38	N
+GI106	13	72hr_post_LPS1	M	G-C	g	c	46	N
+GI107	25	baseline	M	G-C	g	c	48	N
+GI108	30	baseline	M	W-C	w	c	32	N
+GI109	8	pre_LPS1	M	G-L	g	l	61	N
+GI11	19	24hr_post_LPS2	M	W-C	w	c	45	N
+GI110	35	pre_LPS1	M	W-L	w	l	49	N
+GI113	21	pre_biopsy	M	W-L	w	l	104	N
+GI114	27	pre_biopsy	M	W-C	w	c	75	N
+GI115	17	pre_biopsy	M	W-L	w	l	70	N
+GI116	29	72hr_post_LPS1	M	G-L	g	l	58	N
+GI117	22	24hr_post_LPS1	M	G-L	g	l	42	N
+GI118	13	baseline	M	G-C	g	c	47	N
+GI119	21	baseline	M	W-L	w	l	91	N
+GI120	9	pre_LPS1	M	W-C	w	c	58	N
+GI121	18	pre_LPS1	M	G-C	g	c	50	N
+GI123	34	24hr_post_LPS1	M	W-C	w	c	70	N
+GI124	17	72hr_post_LPS1	M	W-L	w	l	56	N
+GI125	4	baseline	M	G-L	g	l	67	N
+GI126	30	pre_biopsy	M	W-C	w	c	60	N
+GI127	16	72hr_post_LPS1	M	W-C	w	c	62	N
+GI128	1	pre_LPS1	M	G-C	g	c	69	N
+GI129	3	baseline	M	G-C	g	c	44	N
+GI130	2	pre_LPS1	M	W-L	w	l	61	N
+GI132	33	24hr_post_LPS1	M	W-C	w	c	43	N
+GI135	9	pre_biopsy	M	W-C	w	c	69	N
+GI136	28	24hr_post_LPS1	M	G-L	g	l	80	N
+GI137	16	24hr_post_LPS1	M	W-C	w	c	61	N
+GI138	1	72hr_post_LPS1	M	G-C	g	c	77	N
+GI139	7	72hr_post_LPS1	M	G-C	g	c	83	N
+GI140	24	baseline	M	G-L	g	l	53	N
+GI141	10	baseline	M	W-L	w	l	48	N
+GI142	25	pre_LPS1	M	G-C	g	c	54	N
+GI143	15	pre_LPS1	M	G-C	g	c	78	N
+GI144	22	pre_LPS1	M	G-L	g	l	44	N
+GI145	13	pre_LPS1	M	G-C	g	c	46	N
+GI146	18	baseline	M	G-C	g	c	42	N
+GI147	19	baseline	M	W-C	w	c	52	N
+GI148	24	72hr_post_LPS1	M	G-L	g	l	56	N
+GI149	9	72hr_post_LPS1	M	W-C	w	c	58	N
+GI150	27	24hr_post_LPS1	M	W-C	w	c	66	N
+GI151	6	24hr_post_LPS1	M	W-C	w	c	56	N
+GI152	2	pre_biopsy	M	W-L	w	l	79	N
+GI153	31	pre_biopsy	M	G-L	g	l	55	N
+GI155	26	pre_LPS1	M	W-L	w	l	56	N
+GI156	21	pre_LPS1	M	W-L	w	l	91	N
+GI157	8	baseline	M	G-L	g	l	56	N
+GI158	28	baseline	M	G-L	g	l	69	N
+GI159	25	72hr_post_LPS1	M	G-C	g	c	49	N
+GI160	18	72hr_post_LPS1	M	G-C	g	c	51	N
+GI161	26	24hr_post_LPS1	M	W-L	w	l	53	N
+GI162	7	24hr_post_LPS1	M	G-C	g	c	74	N
+GI163	1	pre_biopsy	M	G-C	g	c	122	N
+GI164	32	pre_biopsy	M	W-L	w	l	37	N
+GI166	16	pre_LPS1	M	W-C	w	c	63	N
+GI167	19	pre_LPS1	M	W-C	w	c	53	N
+GI168	16	baseline	M	W-C	w	c	68	N
+GI169	23	baseline	M	G-C	g	c	58	N
+GI170	21	72hr_post_LPS1	M	W-L	w	l	92	N
+GI171	11	72hr_post_LPS1	M	G-C	g	c	59	N
+GI172	8	24hr_post_LPS1	M	G-L	g	l	60	N
+GI173	11	24hr_post_LPS1	M	G-C	g	c	56	N
+GI174	8	pre_biopsy	M	G-L	g	l	78	N
+GI177	25	pre_biopsy	M	G-C	g	c	67	N
+GI179	5	24hr_post_LPS1	M	W-L	w	l	38	N
+GI180	4	pre_biopsy	M	G-L	g	l	79	N
+GI181	27	pre_LPS1	M	W-C	w	c	62	N
+GI182	36	pre_LPS1	M	G-L	g	l	38	N
+GI183	7	baseline	M	G-C	g	c	78	N
+GI184	29	baseline	M	G-L	g	l	47	N
+GI185	19	72hr_post_LPS1	M	W-C	w	c	52	N
+GI186	14	24hr_post_LPS1	M	G-L	g	l	53	N
+GI187	23	72hr_post_LPS1	M	G-C	g	c	61	N
+GI188	11	pre_biopsy	M	G-C	g	c	72	N
+GI189	12	pre_biopsy	M	W-L	w	l	56	N
+GI19	26	24hr_post_LPS2	M	W-L	w	l	63	N
+GI192	36	72hr_post_LPS1	M	G-L	g	l	39	N
+GI193	28	72hr_post_LPS1	M	G-L	g	l	77	N
+GI194	18	24hr_post_LPS1	M	G-C	g	c	52	N
+GI195	2	24hr_post_LPS1	M	W-L	w	l	57	N
+GI196	33	pre_LPS1	M	W-C	w	c	44	N
+GI197	11	baseline	M	G-C	g	c	56	N
+GI199	26	pre_biopsy	M	W-L	w	l	66	N
+GI201	11	pre_LPS1	M	G-C	g	c	56	N
+GI202	20	pre_LPS1	M	W-C	w	c	55	N
+GI203	4	24hr_post_LPS1	M	G-L	g	l	59	N
+GI204	5	pre_biopsy	M	W-L	w	l	51	N
+GI205	10	72hr_post_LPS1	M	W-L	w	l	47	N
+GI206	13	24hr_post_LPS1	M	G-C	g	c	45	N
+GI207	14	baseline	M	G-L	g	l	55	N
+GI208	9	baseline	M	W-C	w	c	50	N
+GI209	22	72hr_post_LPS1	M	G-L	g	l	45	N
+GI21	29	24hr_post_LPS2	M	G-L	g	l	63	N
+GI210	10	pre_biopsy	M	W-L	w	l	53	N
+GI211	22	pre_biopsy	M	G-L	g	l	55	N
+GI214	27	72hr_post_LPS1	M	W-C	w	c	57	N
+GI215	34	72hr_post_LPS1	M	W-C	w	c	72	N
+GI216	9	24hr_post_LPS1	M	W-C	w	c	59	N
+GI217	20	24hr_post_LPS1	M	W-C	w	c	54	N
+GI218	19	24hr_post_LPS1	M	W-C	w	c	52	N
+GI219	29	pre_LPS1	M	G-L	g	l	55	N
+GI220	31	24hr_post_LPS1	M	G-L	g	l	46	N
+GI223	18	pre_biopsy	M	G-C	g	c	79	N
+GI224	10	24hr_post_LPS1	M	W-L	w	l	46	N
+GI225	17	24hr_post_LPS1	M	W-L	w	l	56	N
+GI226	33	72hr_post_LPS1	M	W-C	w	c	45	N
+GI227	6	72hr_post_LPS1	M	W-C	w	c	55	N
+GI228	22	baseline	M	G-L	g	l	37	N
+GI229	15	baseline	M	G-C	g	c	71	N
+GI23	1	baseline	M	G-C	g	c	57	N
+GI230	30	pre_LPS1	M	W-C	w	c	39	N
+GI231	24	pre_LPS1	M	G-L	g	l	57	N
+GI232	19	pre_biopsy	M	W-C	w	c	67	N
+GI235	26	72hr_post_LPS1	M	W-L	w	l	51	N
+GI236	5	72hr_post_LPS1	M	W-L	w	l	41	N
+GI237	1	24hr_post_LPS1	M	G-C	g	c	79	N
+GI238	31	baseline	M	G-L	g	l	46	N
+GI24	2	baseline	M	W-L	w	l	59	N
+GI25	3	pre_LPS1	M	G-C	g	c	53	N
+GI26	4	pre_LPS1	M	G-L	g	l	69	N
+GI27	35	24hr_post_LPS1	M	W-L	w	l	47	N
+GI28	36	24hr_post_LPS1	M	G-L	g	l	36	N
+GI29	14	72hr_post_LPS1	M	G-L	g	l	53	N
+GI30	15	72hr_post_LPS1	M	G-C	g	c	73	N
+GI31	28	pre_biopsy	M	G-L	g	l	101	N
+GI32	29	pre_biopsy	M	G-L	g	l	75	N
+G35	35	pre_biopsy	M	W-L	w	l	58	N
+G36	15	pre_biopsy	M	G-C	g	c	95	N
+G37	35	72hr_post_LPS1	M	W-L	w	l	50	N
+G38	3	72hr_post_LPS1	M	G-C	g	c	54	N
+G39	30	24hr_post_LPS1	M	W-C	w	c	39	N
+G40	29	24hr_post_LPS1	M	G-L	g	l	55	N
+G41	17	pre_LPS1	M	W-L	w	l	61	N
+G42	12	pre_LPS1	M	W-L	w	l	45	N
+G43	20	baseline	M	W-C	w	c	43	N
+G44	35	baseline	M	W-L	w	l	54	N
+G45	34	baseline	M	W-C	w	c	76	N
+G46	5	baseline	M	W-L	w	l	39	N
+G47	5	pre_LPS1	M	W-L	w	l	40	N
+G48	28	pre_LPS1	M	G-L	g	l	78	N
+G49	3	24hr_post_LPS1	M	G-C	g	c	55	N
+G50	21	24hr_post_LPS1	M	W-L	w	l	89	N
+G51	32	24hr_post_LPS1	M	W-L	w	l	34	N
+G52	4	72hr_post_LPS1	M	G-L	g	l	61	N
+G53	13	pre_biopsy	M	G-C	g	c	54	N
+G54	34	pre_biopsy	M	W-C	w	c	79	N
+G55	14	pre_LPS1	M	G-L	g	l	54	N
+G56	33	baseline	M	W-C	w	c	43	N
+G57	6	baseline	M	W-C	w	c	56	N
+G58	6	pre_LPS1	M	W-C	w	c	53	N
+G59	32	pre_LPS1	M	W-L	w	l	36	N
+G60	15	24hr_post_LPS1	M	G-C	g	c	76	N
+G61	25	24hr_post_LPS1	M	G-C	g	c	53	N
+G62	2	72hr_post_LPS1	M	W-L	w	l	63	N
+G63	32	72hr_post_LPS1	M	W-L	w	l	32	N
+G64	15	pre_biopsy	M	G-C	g	c	67	N
+GI67	7	pre_LPS1	M	G-C	g	c	75	N
+GI68	36	baseline	M	G-L	g	l	34	N
+GI69	12	baseline	M	W-L	w	l	46	N
+GI70	12	24hr_post_LPS1	M	W-L	w	l	43	N
+GI71	8	72hr_post_LPS1	M	G-L	g	l	60	N
+GI72	20	72hr_post_LPS1	M	W-C	w	c	54	N
+GI73	3	pre_biopsy	M	G-C	g	c	84	N
+GI74	33	pre_biopsy	M	W-C	w	c	50	N
+GI75	20	pre_biopsy	M	W-C	w	c	62	N
+GI81	36	pre_biopsy	M	G-L	g	l	45	N
+GI82	14	pre_biopsy	M	G-L	g	l	65	N
+GI83	12	72hr_post_LPS1	M	W-L	w	l	44	N
+GI84	24	24hr_post_LPS1	M	G-L	g	l	54	N
+GI85	32	baseline	M	W-L	w	l	37	N
+GI86	27	baseline	M	W-C	w	c	54	N
+GI87	34	pre_LPS1	M	W-C	w	c	68	N
+GI88	10	pre_LPS1	M	W-L	w	l	45	N
+GI92	24	pre_biopsy	M	G-L	g	l	69	N
+GI93	7	pre_biopsy	M	G-C	g	c	85	N
+GI94	31	72hr_post_LPS1	M	G-L	g	l	48	N
+GI95	23	24hr_post_LPS1	M	G-C	g	c	62	N
+GI96	26	baseline	M	W-L	w	l	54	N
+GI97	17	baseline	M	W-L	w	l	58	N
+GI98	31	pre_LPS1	M	G-L	g	l	47	N
+GI99	23	pre_LPS1	M	G-C	g	c	61	N
